@@ -11,31 +11,34 @@ const agents = {
   aurelius: {
     icon: "♜",
     name: "Марк Аврелий",
-    role: "Личный мудрец и психолог",
-    description: "Помогает спокойно разобрать чувства, вернуть ясность и выбрать зрелое действие.",
+    role: "Мудрец-психолог",
+    description: "Спокойная мудрость",
     advice: "Отдели факт от суждения. Затем выбери поступок, которым сможешь уважать себя.",
   },
   machiavelli: {
     icon: "♞",
     name: "Макиавелли",
-    role: "Коуч и тактический бизнес-тренер",
-    description: "Помогает видеть интересы, переговоры, власть, риск и следующий выгодный ход.",
+    role: "Бизнес-тактик",
+    description: "Холодная стратегия",
     advice: "Назови цель, рычаг влияния и следующий ход. Тактика начинается с позиции.",
   },
   jung: {
     icon: "◐",
     name: "Карл Юнг",
-    role: "Психоаналитик тени",
-    description: "Помогает увидеть вытесненные желания, страхи, проекции и темную сторону.",
+    role: "Аналитик тени",
+    description: "Глубокая тень",
     advice: "Спроси, какую часть себя ты не хочешь видеть. Там часто начинается рост.",
   },
 };
 
 const state = loadState();
 applyRegistrationParams();
+const initialView = getInitialView();
 
 const elements = {
   agentRail: document.querySelector("#agentRail"),
+  askForm: document.querySelector("#askForm"),
+  askInput: document.querySelector("#askInput"),
   assistantName: document.querySelector("#assistantName"),
   assistantSheet: document.querySelector("#assistantSheet"),
   assistantText: document.querySelector("#assistantText"),
@@ -54,11 +57,6 @@ const elements = {
   mementoForm: document.querySelector("#mementoForm"),
   mementoText: document.querySelector("#mementoText"),
   mementoTitle: document.querySelector("#mementoTitle"),
-  advisorAddress: document.querySelector("#advisorAddress"),
-  advisorLanguage: document.querySelector("#advisorLanguage"),
-  advisorSymbol: document.querySelector("#advisorSymbol"),
-  advisorTone: document.querySelector("#advisorTone"),
-  advisorTraits: document.querySelector("#advisorTraits"),
   memoryList: document.querySelector("#memoryList"),
   profileCompletion: document.querySelector("#profileCompletion"),
   profileLanguage: document.querySelector("#profileLanguage"),
@@ -68,6 +66,7 @@ const elements = {
   profileSheetBody: document.querySelector("#profileSheetBody"),
   profileSheetTitle: document.querySelector("#profileSheetTitle"),
   subscriptionBadge: document.querySelector("#subscriptionBadge"),
+  startAgentDialogButton: document.querySelector("#startAgentDialogButton"),
   tokenCount: document.querySelector("#tokenCount"),
   profileAgent: document.querySelector("#profileAgent"),
   weeksLeft: document.querySelector("#weeksLeft"),
@@ -82,6 +81,7 @@ tg?.setBackgroundColor?.("#070706");
 elements.birthDateInput.max = todayKey;
 renderAll();
 bindEvents();
+openView(initialView);
 
 function bindEvents() {
   document.body.addEventListener("click", (event) => {
@@ -143,6 +143,13 @@ function bindEvents() {
     renderDiary();
     showAnswer("Запись сохранена. Это уже не просто мысль в голове, а след твоего пути.");
   });
+
+  elements.askForm?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const question = elements.askInput.value.trim();
+    elements.askInput.value = "";
+    requestAgentAdvice(question);
+  });
 }
 
 function runAction(action, button) {
@@ -155,7 +162,8 @@ function runAction(action, button) {
     "diary-prompt": () => applyDiaryPrompt(button.dataset.prompt),
     "open-sheet": () => openProfileSheet(button.dataset.sheet),
     "select-agent": () => selectAgent(button.dataset.agent),
-    "agent-advice": () => showAnswer(getActiveAgent().advice),
+    "start-agent-dialog": () => startAgentDialog(),
+    "agent-advice": () => requestAgentAdvice(),
   };
 
   actions[action]?.();
@@ -187,7 +195,6 @@ function renderAgents() {
         <article class="quote-card agent-card${activeClass}" data-action="select-agent" data-agent="${id}">
           <span class="agent-mark">${agent.icon}</span>
           <h3>${agent.name}</h3>
-          <p>${agent.description}</p>
           <small>${agent.role}</small>
         </article>
       `;
@@ -282,6 +289,7 @@ function getProfileCompletion() {
     state.name,
     state.gender,
     getAgeLabel(),
+    state.birthDate,
     state.location || state.country,
     state.activity,
     state.interests,
@@ -304,7 +312,6 @@ function activeGoalText() {
 
 function renderProfile() {
   const agent = getActiveAgent();
-  const advisor = state.advisor;
   const completion = getProfileCompletion();
 
   if (elements.profileAgent) {
@@ -314,11 +321,6 @@ function renderProfile() {
   elements.profilePlan.textContent = state.plan;
   elements.subscriptionBadge.textContent = state.plan;
   elements.tokenCount.textContent = String(state.tokens);
-  elements.advisorTone.textContent = advisor.tone;
-  elements.advisorLanguage.textContent = advisor.language;
-  elements.advisorSymbol.textContent = advisor.symbol;
-  elements.advisorAddress.textContent = advisor.address;
-  elements.advisorTraits.textContent = `Черты: ${advisor.traits || "не указано"}.`;
   elements.profileCompletion.textContent = `${completion}%`;
   elements.profileProgressBar.style.width = `${completion}%`;
 
@@ -330,6 +332,7 @@ function renderMemoryList() {
     ["Имя", state.name],
     ["Пол", state.gender],
     ["Возраст", getAgeLabel()],
+    ["Дата рождения", formatBirthDateLabel(state.birthDate)],
     ["Локация", state.location || state.country],
     ["Вид деятельности", state.activity],
     ["Интересы", state.interests],
@@ -354,7 +357,6 @@ function renderMemoryList() {
 function openProfileSheet(sheetName) {
   const renderers = {
     about: renderAboutSheet,
-    advisor: renderAdvisorSheet,
     language: () => renderSimpleSheet("Язык", "Язык интерфейса синхронизируется с регистрацией в боте. Сейчас выбран: " + elements.profileLanguage.textContent),
     "profile-menu": () => renderSimpleSheet("Меню", "Здесь позже появятся настройки безопасности, экспорт данных и история решений."),
     subscription: renderSubscriptionSheet,
@@ -384,34 +386,6 @@ function renderSubscriptionSheet() {
   `;
   elements.profileSheetBody.querySelector("[data-sheet-save='plan']").addEventListener("click", () => {
     state.plan = "Pro";
-    saveState();
-    renderProfile();
-    closeProfileSheet();
-  });
-}
-
-function renderAdvisorSheet() {
-  elements.profileSheetTitle.textContent = "Личность Marcus";
-  elements.profileSheetBody.innerHTML = `
-    <form class="sheet-form" id="advisorForm">
-      <label>Стиль общения<input name="tone" value="${escapeAttr(state.advisor.tone)}" /></label>
-      <label>Язык Marcus<input name="language" value="${escapeAttr(state.advisor.language)}" /></label>
-      <label>Любимый символ<input name="symbol" value="${escapeAttr(state.advisor.symbol)}" maxlength="4" /></label>
-      <label>Черты характера<textarea name="traits">${escapeHtml(state.advisor.traits)}</textarea></label>
-      <label>Как обращаться к пользователю<input name="address" value="${escapeAttr(state.advisor.address)}" /></label>
-      <button type="submit">Сохранить</button>
-    </form>
-  `;
-  elements.profileSheetBody.querySelector("#advisorForm").addEventListener("submit", (event) => {
-    event.preventDefault();
-    const form = new FormData(event.currentTarget);
-    state.advisor = {
-      tone: form.get("tone").trim() || "Мудрый",
-      language: form.get("language").trim() || "Русский",
-      symbol: form.get("symbol").trim() || "♜",
-      traits: form.get("traits").trim(),
-      address: form.get("address").trim() || "путник",
-    };
     saveState();
     renderProfile();
     closeProfileSheet();
@@ -450,12 +424,92 @@ function renderAboutSheet() {
   });
 }
 
+async function requestAgentAdvice(question = "") {
+  const agent = getActiveAgent();
+
+  if (state.activeAgent !== "aurelius") {
+    showAnswer(agent.advice);
+    return;
+  }
+
+  showAnswer("Марк Аврелий размышляет...");
+
+  try {
+    const response = await fetch("/api/agent/aurelius", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message: question || "Дай мне короткий стоический совет на сегодня.",
+        profile: {
+          name: state.name,
+          age: getAgeLabel(),
+          location: state.location || state.country,
+          interests: state.interests,
+          mainGoal: state.mainGoal || activeGoalText(),
+          currentProblem: state.currentProblem,
+        },
+        diary: (state.diary ?? []).slice(0, 3).map((entry) => entry.text),
+      }),
+    });
+
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || "Gemini request failed");
+    }
+
+    showAnswer(data.answer || agent.advice);
+  } catch (error) {
+    console.warn(error);
+    showAnswer(`Gemini пока недоступен. ${agent.advice}`);
+  }
+}
+
 function selectAgent(agentId) {
   if (!agents[agentId]) return;
   state.activeAgent = agentId;
   saveState();
   renderAll();
-  showAnswer(`${agents[agentId].name} выбран. ${agents[agentId].advice}`);
+  showAnswer(`${agents[agentId].name} выбран. Начни диалог, и общение продолжится в Telegram-боте.`, {
+    canStartDialog: true,
+  });
+}
+
+function startAgentDialog() {
+  void startAgentDialogFromMiniApp();
+}
+
+async function startAgentDialogFromMiniApp() {
+  const agent = getActiveAgent();
+  const payload = {
+    agentId: state.activeAgent,
+    initData: tg?.initData || "",
+  };
+
+  try {
+    if (!payload.initData) {
+      throw new Error("Telegram initData is unavailable");
+    }
+
+    const response = await fetch("/api/start-agent-dialog", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(data.error || "Could not start agent dialog");
+    }
+
+    showAnswer(`Диалог с ${agent.name} открыт в Telegram-боте.`);
+    if (data.botUsername && tg?.openTelegramLink) {
+      setTimeout(() => tg.openTelegramLink(`https://t.me/${data.botUsername}`), 450);
+    } else {
+      setTimeout(() => tg?.close?.(), 450);
+    }
+  } catch (error) {
+    console.warn(error);
+    showAnswer("Диалог можно начать только внутри Telegram Mini App, открытого из этого бота.");
+  }
 }
 
 function closeGoal() {
@@ -484,10 +538,11 @@ function sendGoalToBot(type, goal) {
   }
 }
 
-function showAnswer(text) {
+function showAnswer(text, options = {}) {
   const agent = getActiveAgent();
   elements.assistantName.textContent = agent.name;
   elements.assistantText.textContent = text;
+  elements.startAgentDialogButton.hidden = !options.canStartDialog;
   elements.assistantSheet.hidden = false;
   haptic("impact");
 }
@@ -511,11 +566,25 @@ function renderLifeGrid(weeksLived) {
   const currentWeek = Math.min(Math.max(weeksLived, 0), TOTAL_LIFE_WEEKS - 1);
   let markup = "";
 
-  for (let week = 0; week < TOTAL_LIFE_WEEKS; week += 1) {
-    const className = week < weeksLived ? "life-week is-lived" : week === currentWeek ? "life-week is-current" : "life-week";
-    const year = Math.floor(week / WEEKS_PER_YEAR) + 1;
-    const weekInYear = (week % WEEKS_PER_YEAR) + 1;
-    markup += `<span class="${className}" title="Год ${year}, неделя ${weekInYear}"></span>`;
+  for (let startYear = 0; startYear < LIFE_EXPECTANCY_YEARS; startYear += 5) {
+    const endYear = Math.min(startYear + 5, LIFE_EXPECTANCY_YEARS);
+    const startWeek = startYear * WEEKS_PER_YEAR;
+    const endWeek = endYear * WEEKS_PER_YEAR;
+    let weekMarkup = "";
+
+    for (let week = startWeek; week < endWeek; week += 1) {
+      const className = week < weeksLived ? "life-week is-lived" : week === currentWeek ? "life-week is-current" : "life-week";
+      const year = Math.floor(week / WEEKS_PER_YEAR) + 1;
+      const weekInYear = (week % WEEKS_PER_YEAR) + 1;
+      weekMarkup += `<span class="${className}" title="Год ${year}, неделя ${weekInYear}"></span>`;
+    }
+
+    markup += `
+      <div class="life-era">
+        <div class="life-era-grid">${weekMarkup}</div>
+        <span class="life-era-age">${endYear}</span>
+      </div>
+    `;
   }
 
   elements.lifeGrid.innerHTML = markup;
@@ -550,15 +619,28 @@ function applyRegistrationParams() {
     if (value) state[key] = value;
   });
 
+  if (registration.country) {
+    state.location = registration.country;
+  }
+
   if (Object.values(registration).some(Boolean)) {
     saveState();
   }
 }
 
+function formatBirthDateLabel(value) {
+  if (!value) return "";
+  return formatDateOnly(parseLocalDate(value));
+}
+
+function getInitialView() {
+  const view = new URLSearchParams(window.location.search).get("view");
+  return ["home", "calendar", "profile"].includes(view) ? view : "home";
+}
+
 function loadState() {
   const defaults = {
     activeAgent: "aurelius",
-    advisor: defaultAdvisor(),
     birthDate: "",
     country: "",
     activity: "",
@@ -578,20 +660,10 @@ function loadState() {
 
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
-    return { ...defaults, ...saved, advisor: { ...defaults.advisor, ...(saved?.advisor ?? {}) } };
+    return { ...defaults, ...saved };
   } catch {
     return defaults;
   }
-}
-
-function defaultAdvisor() {
-  return {
-    address: "путник",
-    language: "Русский",
-    symbol: "♜",
-    tone: "Мудрый",
-    traits: "спокойный, внимательный, прямой, стратегичный",
-  };
 }
 
 function saveState() {

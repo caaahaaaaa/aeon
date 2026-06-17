@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>aeon</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=20260615-hero-subtitle-gold" />
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
   </head>
   <body>
@@ -12,19 +12,15 @@
       <main class="screen" id="app">
         <section class="view is-active" data-view="home" aria-label="Главная">
           <header class="hero compact-hero">
-            <nav class="mini-topbar" aria-label="Верхняя панель">
-              <button class="plain-button" type="button" data-action="close">Закрыть</button>
-              <div class="brand">
-                <strong>Marcus Aurelius</strong>
-                <span>мини-приложение</span>
-              </div>
-              <button class="circle-button" type="button" data-tab="profile" aria-label="Личный кабинет">...</button>
-            </nav>
-
             <div class="hero-copy">
-              <h1>Выбери советника для сегодняшнего решения</h1>
+              <h1>Что мы улучшим сегодня, друг мой?</h1>
               <p>Мудрость. Тактика. Глубина.</p>
             </div>
+
+            <form class="ask-box" id="askForm">
+              <input id="askInput" type="text" maxlength="240" autocomplete="off" placeholder="Спроси Марка Аврелия..." />
+              <button type="submit" aria-label="Спросить">↑</button>
+            </form>
           </header>
 
           <section class="section-row">
@@ -68,6 +64,7 @@
           </section>
 
           <section class="memento-panel">
+            <div class="memento-print-title">MEMENTO MORI</div>
             <div class="memento-heading">
               <div>
                 <h3 id="mementoTitle">Введи дату рождения</h3>
@@ -144,24 +141,6 @@
             </button>
           </section>
 
-          <section class="profile-panel advisor-card" data-action="open-sheet" data-sheet="advisor">
-            <div class="panel-title">
-              <h3>Личность Marcus</h3>
-              <button type="button" data-action="open-sheet" data-sheet="advisor">Изменить</button>
-            </div>
-            <div class="advisor-grid">
-              <span>Стиль общения</span>
-              <strong id="advisorTone">Мудрый</strong>
-              <span>Язык Marcus</span>
-              <strong id="advisorLanguage">Русский</strong>
-              <span>Символ</span>
-              <strong id="advisorSymbol">♜</strong>
-              <span>Обращение</span>
-              <strong id="advisorAddress">путник</strong>
-            </div>
-            <p id="advisorTraits">Черты: спокойный, внимательный, прямой, стратегичный.</p>
-          </section>
-
           <section class="profile-panel about-card" data-action="open-sheet" data-sheet="about">
             <div class="panel-title">
               <h3>О вас</h3>
@@ -179,28 +158,6 @@
             <div class="memory-list" id="memoryList"></div>
           </section>
 
-          <section class="profile-panel thinking-card">
-            <h3>Мой профиль мышления</h3>
-            <div class="thinking-list">
-              <article>
-                <span>Доминирующий архетип</span>
-                <strong id="thinkingArchetype">Искатель порядка</strong>
-              </article>
-              <article>
-                <span>Сильные стороны</span>
-                <strong id="thinkingStrengths">Стратегия, самоанализ, дисциплина</strong>
-              </article>
-              <article>
-                <span>Повторяющиеся паттерны</span>
-                <strong id="thinkingPatterns">Много планов, высокий внутренний стандарт</strong>
-              </article>
-              <article>
-                <span>Слепые зоны</span>
-                <strong id="thinkingBlindSpots">Откладывание отдыха, резкость к себе</strong>
-              </article>
-            </div>
-          </section>
-
           <section class="profile-panel pro-card" data-action="open-sheet" data-sheet="subscription">
             <div class="panel-title">
               <h3>Подписка</h3>
@@ -212,7 +169,6 @@
               <li>Совет трех умов</li>
               <li>Глубокий разбор решений</li>
               <li>История решений</li>
-              <li>Профиль мышления</li>
               <li>Голосовые ответы</li>
             </ul>
             <button type="button" data-action="open-sheet" data-sheet="subscription">Улучшить до Pro</button>
@@ -227,6 +183,7 @@
           <p id="assistantText"></p>
         </div>
         <div class="sheet-actions">
+          <button type="button" data-action="start-agent-dialog" id="startAgentDialogButton" hidden>Начать диалог</button>
           <button type="button" data-action="close-sheet">Понятно</button>
         </div>
       </aside>
@@ -259,6 +216,6 @@
       </nav>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js?v=20260615-hero-subtitle-gold"></script>
   </body>
 </html>

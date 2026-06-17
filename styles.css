@@ -31,8 +31,8 @@ body {
   background:
     radial-gradient(circle at 72% 6%, rgba(180, 139, 87, 0.24), transparent 28rem),
     radial-gradient(circle at 16% 0%, rgba(137, 123, 95, 0.16), transparent 18rem),
-    var(--tg-theme-bg-color, var(--bg));
-  color: var(--tg-theme-text-color, var(--text));
+    var(--bg);
+  color: var(--text);
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -81,19 +81,19 @@ button {
 
 .hero {
   position: relative;
-  min-height: 492px;
+  min-height: 500px;
   margin: 0 -18px;
-  padding: 18px 18px 24px;
+  padding: 18px 18px 28px;
   overflow: hidden;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .compact-hero {
-  min-height: 360px;
+  min-height: 430px;
 }
 
 .compact-hero .hero-copy {
-  margin-top: 106px;
+  margin-top: 150px;
 }
 
 .hero::before {
@@ -101,28 +101,23 @@ button {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, rgba(7, 7, 6, 0.26), #070706 93%),
-    radial-gradient(circle at 73% 36%, transparent 0 96px, rgba(6, 6, 5, 0.08) 97px),
-    linear-gradient(115deg, rgba(0, 0, 0, 0.74) 0 38%, rgba(0, 0, 0, 0.22) 58%, rgba(0, 0, 0, 0.84) 100%);
+    linear-gradient(180deg, rgba(7, 7, 6, 0.1), #070706 94%),
+    radial-gradient(circle at 76% 34%, rgba(190, 154, 104, 0.2), transparent 150px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.86) 0 43%, rgba(0, 0, 0, 0.28) 72%, rgba(0, 0, 0, 0.82) 100%);
   z-index: 1;
 }
 
 .hero::after {
   content: "";
   position: absolute;
-  right: -22px;
-  top: 82px;
-  width: 276px;
-  height: 330px;
-  background:
-    radial-gradient(ellipse at 51% 21%, #5b554d 0 18%, transparent 19%),
-    radial-gradient(ellipse at 51% 34%, #7a7167 0 26%, transparent 27%),
-    radial-gradient(ellipse at 50% 61%, #3a3631 0 39%, transparent 40%),
-    linear-gradient(90deg, transparent 0 26%, rgba(121, 111, 99, 0.72) 27% 35%, transparent 36% 100%),
-    linear-gradient(180deg, transparent 0 72%, rgba(64, 55, 45, 0.64) 73% 100%);
-  filter: grayscale(0.18) contrast(1.08) brightness(0.82);
-  opacity: 0.78;
-  mask-image: radial-gradient(ellipse at 50% 45%, #000 0 58%, transparent 72%);
+  right: -46px;
+  top: 22px;
+  width: min(68vw, 340px);
+  height: 420px;
+  background: url("assets/hero-sisyphus.jpeg") center / contain no-repeat;
+  filter: contrast(1.08) brightness(0.76);
+  opacity: 0.94;
+  mask-image: linear-gradient(90deg, transparent 0, #000 26%, #000 76%, transparent 100%);
   z-index: 0;
 }
 
@@ -186,7 +181,7 @@ button {
 .practice-card p,
 .journal-card time,
 .stats-grid span {
-  color: var(--tg-theme-hint-color, var(--muted));
+  color: var(--muted);
 }
 
 .plain-button,
@@ -254,8 +249,8 @@ button {
 }
 
 .hero-copy {
-  width: min(76%, 340px);
-  margin-top: 72px;
+  width: min(78%, 360px);
+  margin-top: 118px;
 }
 
 .hero-copy h1,
@@ -267,8 +262,8 @@ button {
 }
 
 .hero-copy h1 {
-  font-size: clamp(34px, 9vw, 52px);
-  line-height: 1.03;
+  font-size: clamp(38px, 10.2vw, 58px);
+  line-height: 1;
   text-wrap: balance;
 }
 
@@ -276,18 +271,18 @@ button {
   margin: 14px 0 0;
   font-size: 14px;
   font-weight: 650;
-  color: #e5d8c2;
+  color: rgba(225, 195, 150, 0.82);
 }
 
 .ask-box {
   display: grid;
   grid-template-columns: 1fr 48px;
   gap: 8px;
-  height: 62px;
+  height: 64px;
   margin-top: 26px;
   border: 1px solid rgba(255, 255, 255, 0.1);
-  border-radius: 24px;
-  background: rgba(36, 34, 32, 0.86);
+  border-radius: 23px;
+  background: rgba(33, 31, 29, 0.82);
   box-shadow: var(--shadow);
   backdrop-filter: blur(24px);
   padding: 7px;
@@ -401,13 +396,11 @@ button {
 
 .quote-rail {
   display: grid;
-  grid-auto-columns: minmax(140px, 31%);
-  grid-auto-flow: column;
-  gap: 12px;
-  margin: 0 -18px;
-  overflow-x: auto;
-  padding: 0 18px 8px;
-  scrollbar-width: none;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin: 0;
+  overflow: visible;
+  padding: 0 0 8px;
 }
 
 .quote-rail::-webkit-scrollbar {
@@ -416,7 +409,7 @@ button {
 
 .quote-card {
   position: relative;
-  min-height: 190px;
+  min-height: 138px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: 18px;
@@ -424,7 +417,7 @@ button {
     linear-gradient(180deg, rgba(22, 21, 19, 0.1), rgba(12, 11, 10, 0.94)),
     radial-gradient(circle at 70% 18%, rgba(188, 153, 106, 0.28), transparent 70px),
     #151413;
-  padding: 18px 14px 14px;
+  padding: 12px 8px 13px;
 }
 
 .quote-card::before {
@@ -438,14 +431,41 @@ button {
 }
 
 .agent-card {
+  display: flex;
+  flex-direction: column;
   cursor: pointer;
 }
 
+.agent-card[data-agent="aurelius"] {
+  background:
+    linear-gradient(180deg, rgba(8, 8, 7, 0.18), rgba(5, 5, 4, 0.94)),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.76), rgba(0, 0, 0, 0.18)),
+    url("assets/agent-aurelius.jpeg") 45% 50% / 230% auto no-repeat,
+    #151413;
+}
+
+.agent-card[data-agent="machiavelli"] {
+  background:
+    linear-gradient(180deg, rgba(8, 8, 7, 0.18), rgba(5, 5, 4, 0.94)),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.76), rgba(0, 0, 0, 0.18)),
+    url("assets/agent-machiavelli.jpeg") 52% 30% / 150% auto no-repeat,
+    #151413;
+}
+
+.agent-card[data-agent="jung"] {
+  background:
+    linear-gradient(180deg, rgba(8, 8, 7, 0.18), rgba(5, 5, 4, 0.94)),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.76), rgba(0, 0, 0, 0.18)),
+    url("assets/agent-jung.jpeg") 51% 18% / 145% auto no-repeat,
+    #151413;
+}
+
 .agent-card.is-active {
-  border-color: rgba(225, 195, 150, 0.52);
+  border-color: rgba(225, 195, 150, 0.64);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.08),
-    0 0 0 1px rgba(225, 195, 150, 0.14);
+    inset 0 1px 0 rgba(255, 255, 255, 0.1),
+    inset 0 0 34px rgba(225, 195, 150, 0.06),
+    0 0 0 1px rgba(225, 195, 150, 0.18);
 }
 
 .agent-card::before {
@@ -454,28 +474,38 @@ button {
 }
 
 .agent-mark {
-  display: grid;
-  width: 38px;
-  height: 38px;
+  display: none;
+  width: 26px;
+  height: 26px;
   place-items: center;
-  margin-bottom: 22px;
-  border-radius: 14px;
-  background: rgba(225, 195, 150, 0.13);
-  color: var(--gold-strong);
-  font-size: 24px;
+  margin-bottom: auto;
+  border-radius: 10px;
+  background: rgba(225, 195, 150, 0.1);
+  color: rgba(225, 195, 150, 0.86);
+  font-size: 15px;
+  backdrop-filter: blur(8px);
+}
+
+.agent-card>* {
+  position: relative;
+  z-index: 1;
 }
 
 .agent-card h3 {
-  margin: 0 0 8px;
+  margin: auto 0 0;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 19px;
-  line-height: 1.05;
+  font-size: clamp(13px, 3vw, 17px);
+  line-height: 1.08;
+  overflow-wrap: normal;
+  word-break: normal;
+  hyphens: none;
 }
 
 .quote-card p {
-  margin: 0 0 14px;
+  margin: 0;
   font-weight: 760;
-  line-height: 1.22;
+  line-height: 1.16;
+  font-size: clamp(15px, 3.7vw, 17px);
 }
 
 .quote-card small {
@@ -484,6 +514,18 @@ button {
   bottom: 14px;
   color: var(--gold);
   font-size: 11px;
+}
+
+.agent-card small {
+  position: static;
+  display: block;
+  margin-top: 9px;
+  padding-top: 0;
+  color: rgba(225, 195, 150, 0.82);
+  font-size: clamp(9px, 2.4vw, 11px);
+  line-height: 1.25;
+  overflow-wrap: normal;
+  word-break: normal;
 }
 
 .path-list,
@@ -690,75 +732,112 @@ button {
 
 .memento-panel {
   margin-top: 12px;
-  padding: 14px;
+  border-color: rgba(42, 39, 33, 0.25);
+  background:
+    radial-gradient(circle at 18% 8%, rgba(255, 255, 255, 0.42), transparent 18%),
+    linear-gradient(180deg, #efe6d3 0%, #e6dcc5 100%);
+  color: #25231f;
+  padding: clamp(16px, 4vw, 28px);
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.36), inset 0 0 0 1px rgba(255, 255, 255, 0.34);
+}
+
+.memento-print-title {
+  margin: 0 0 18px;
+  color: #24231f;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: clamp(20px, 5vw, 34px);
+  letter-spacing: 0.46em;
+  text-align: center;
+  text-indent: 0.46em;
+  line-height: 1.1;
 }
 
 .memento-heading {
   display: grid;
-  grid-template-columns: 1fr 54px;
+  grid-template-columns: 1fr 52px;
   gap: 12px;
   align-items: start;
-  margin-bottom: 14px;
+  margin-bottom: 18px;
+  border-top: 1px solid rgba(40, 37, 31, 0.18);
+  border-bottom: 1px solid rgba(40, 37, 31, 0.18);
+  padding: 12px 0;
 }
 
 .memento-heading h3 {
-  margin: 0 0 6px;
+  margin: 0 0 5px;
   font-family: Georgia, "Times New Roman", serif;
-  font-size: 22px;
+  font-size: 20px;
 }
 
 .memento-heading p {
   margin: 0;
-  color: #d7cebf;
+  color: #5c5548;
   line-height: 1.42;
 }
 
-.memento-heading > span {
+.memento-heading>span {
   display: grid;
-  width: 54px;
-  height: 54px;
+  width: 52px;
+  height: 52px;
   place-items: center;
-  border: 1px solid rgba(225, 195, 150, 0.25);
-  border-radius: 18px;
-  color: var(--gold-strong);
-  font-size: 24px;
+  border: 1px solid rgba(37, 35, 31, 0.42);
+  border-radius: 0;
+  color: #24231f;
+  font-size: 22px;
   font-weight: 850;
 }
 
 .life-grid {
   display: grid;
+  gap: clamp(12px, 3vw, 22px);
+  overflow: visible;
+}
+
+.life-era {
+  display: grid;
+  grid-template-columns: 1fr 22px;
+  gap: 8px;
+  align-items: end;
+}
+
+.life-era-grid {
+  display: grid;
   grid-template-columns: repeat(52, minmax(3px, 1fr));
   gap: 2px;
-  max-height: 430px;
-  overflow: auto;
-  border: 1px solid rgba(255, 255, 255, 0.06);
-  border-radius: 14px;
-  background: rgba(0, 0, 0, 0.22);
-  padding: 10px;
+}
+
+.life-era-age {
+  color: #5d574c;
+  font-family: Georgia, "Times New Roman", serif;
+  font-size: 12px;
+  line-height: 1;
+  transform: translateY(1px);
 }
 
 .life-week {
   aspect-ratio: 1;
   min-width: 3px;
-  border-radius: 2px;
-  background: rgba(255, 255, 255, 0.11);
+  border: 1px solid #2d2b27;
+  border-radius: 0;
+  background: transparent;
 }
 
 .life-week.is-lived {
-  background: rgba(193, 160, 116, 0.72);
+  background: #25231f;
 }
 
 .life-week.is-current {
-  background: var(--danger);
-  box-shadow: 0 0 0 2px rgba(213, 114, 103, 0.22);
+  border-color: #7d5c3e;
+  background: #c5a16d;
+  box-shadow: 0 0 0 1px rgba(125, 92, 62, 0.38);
 }
 
 .life-legend {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  margin-top: 12px;
-  color: var(--muted);
+  margin-top: 16px;
+  color: #5d574c;
   font-size: 12px;
 }
 
@@ -772,16 +851,18 @@ button {
   display: inline-block;
   width: 10px;
   height: 10px;
-  border-radius: 3px;
-  background: rgba(255, 255, 255, 0.11);
+  border: 1px solid #2d2b27;
+  border-radius: 0;
+  background: transparent;
 }
 
 .life-legend .is-lived {
-  background: rgba(193, 160, 116, 0.72);
+  background: #25231f;
 }
 
 .life-legend .is-current {
-  background: var(--danger);
+  border-color: #7d5c3e;
+  background: #c5a16d;
 }
 
 .stats-grid {
@@ -1043,25 +1124,11 @@ button {
   cursor: pointer;
 }
 
-.advisor-grid,
-.thinking-list {
-  display: grid;
-  gap: 12px;
-}
-
-.advisor-grid {
-  grid-template-columns: 1fr 1fr;
-}
-
-.advisor-grid span,
-.thinking-list span,
 .memory-list span {
   color: var(--muted);
   font-size: 12px;
 }
 
-.advisor-grid strong,
-.thinking-list strong,
 .memory-list strong {
   display: block;
   margin-top: 3px;
@@ -1070,7 +1137,6 @@ button {
   line-height: 1.28;
 }
 
-.advisor-card,
 .about-card,
 .pro-card {
   cursor: pointer;
@@ -1084,7 +1150,7 @@ button {
   margin-bottom: 14px;
 }
 
-.profile-progress-box > div:first-child {
+.profile-progress-box>div:first-child {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1130,16 +1196,6 @@ button {
   font-size: 12px;
 }
 
-.thinking-list article {
-  border-top: 1px solid var(--line);
-  padding-top: 12px;
-}
-
-.thinking-list article:first-child {
-  border-top: 0;
-  padding-top: 0;
-}
-
 .pro-card ul {
   display: grid;
   gap: 8px;
@@ -1158,7 +1214,7 @@ button {
   color: var(--gold);
 }
 
-.pro-card > button {
+.pro-card>button {
   width: 100%;
   min-height: 46px;
   border: 0;
@@ -1478,6 +1534,16 @@ button {
   color: #1e1711;
 }
 
+.sheet-actions #startAgentDialogButton:not([hidden]) {
+  background: linear-gradient(135deg, #d4b588, #7d5c3e);
+  color: #1e1711;
+}
+
+.sheet-actions #startAgentDialogButton:not([hidden])+button {
+  background: rgba(255, 255, 255, 0.07);
+  color: var(--text);
+}
+
 .bottom-nav {
   position: fixed;
   left: 50%;
@@ -1533,6 +1599,7 @@ button {
     opacity: 0;
     transform: translateY(8px);
   }
+
   to {
     opacity: 1;
     transform: translateY(0);
@@ -1559,19 +1626,26 @@ button {
     font-size: 16px;
   }
 
-  .quote-rail {
-    grid-auto-columns: minmax(132px, 40%);
-    margin-inline: -14px;
-    padding-inline: 14px;
-  }
-
   .memento-form div {
     grid-template-columns: 1fr;
   }
 
+  .memento-print-title {
+    letter-spacing: 0.28em;
+    text-indent: 0.28em;
+  }
+
   .life-grid {
+    gap: 12px;
+  }
+
+  .life-era {
+    grid-template-columns: 1fr 18px;
+    gap: 5px;
+  }
+
+  .life-era-grid {
     gap: 1px;
-    padding: 8px;
   }
 
   .memento-summary strong {
