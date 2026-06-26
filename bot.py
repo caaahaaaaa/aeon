@@ -3,6 +3,7 @@ import hashlib
 import hmac
 import mimetypes
 import os
+import re
 import time
 import urllib.error
 import urllib.parse
@@ -11,7 +12,17 @@ from datetime import datetime, timedelta
 import calendar
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from threading import Thread
+from threading import Lock, Thread
+
+try:
+    from pymongo import MongoClient
+except ImportError:
+    MongoClient = None
+
+try:
+    import redis
+except ImportError:
+    redis = None
 
 
 API_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
@@ -19,15 +30,25 @@ WEBAPP_URL = os.environ.get("WEBAPP_URL", "https://example.com")
 API_URL = f"https://api.telegram.org/bot{API_TOKEN}" if API_TOKEN else ""
 BOT_USERNAME = os.environ.get("BOT_USERNAME", "")
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
-GEMINI_MAX_OUTPUT_TOKENS = int(os.environ.get("GEMINI_MAX_OUTPUT_TOKENS", "2400"))
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MAX_OUTPUT_TOKENS = int(os.environ.get("GEMINI_MAX_OUTPUT_TOKENS", "2500"))
 GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 PORT = int(os.environ.get("PORT", os.environ.get("WEB_PORT", "5173")))
 DATA_DIR = Path("data")
 REGISTRATIONS_FILE = DATA_DIR / "registrations.json"
+MONGODB_URI = os.environ.get("MONGODB_URI", "")
+MONGODB_DB = os.environ.get("MONGODB_DB", "aeon")
+MONGODB_USERS_COLLECTION = os.environ.get("MONGODB_USERS_COLLECTION", "registrations")
+REDIS_URL = os.environ.get("REDIS_URL", "")
+REDIS_AGENT_HISTORY_TTL = int(os.environ.get("REDIS_AGENT_HISTORY_TTL", "2592000"))
 REMINDER_HOUR = int(os.environ.get("REMINDER_HOUR", "9"))
 STATIC_ROOT = Path(__file__).resolve().parent
 INIT_DATA_MAX_AGE = int(os.environ.get("INIT_DATA_MAX_AGE", "172800"))
+mongo_client = None
+mongo_collection = None
+redis_client = None
+redis_connection_failed = False
+storage_lock = Lock()
 
 LANGUAGES = {"ru": "Русский", "en": "English"}
 COUNTRIES = [
@@ -49,9 +70,20 @@ AGENTS = {
         "role": "личный мудрец и психолог",
         "intro": "Диалог с Марком Аврелием открыт. Напиши, что требует ясности.",
         "system": (
-            "Ты AI-наставник Марк Аврелий. Отвечай на русском языке, спокойно, ясно и по-стоически. "
-            "Помогай человеку отделять факты от суждений, возвращать внутренний порядок и выбирать зрелое действие. "
-            "Не притворяйся историческим Марком Аврелием. Пиши 4-7 предложений, без лишнего пафоса."
+            "Ты римский философ-стоик Марк Аврелий, наставник и мудрый советник. "
+            "Отвечай на русском языке спокойно, глубоко и по-стоически. "
+            "Твоя задача — помогать человеку исследовать жизненные цели, предназначение и смысл жизни, "
+            "направляя его с помощью вопросов, как бережный психолог и наставник. "
+            "Не отвечай за пользователя и не навязывай ему готовую истину; помогай ему самому прийти к осмысленному взгляду "
+            "на свои стремления, ценности и цели. "
+            "Если человек затрудняется ответить на вопрос, поддержи его примерным вариантом ответа, который может помочь разобраться в себе. "
+            "Например: вопрос — «Почему это важно для тебя?»; примерный ответ — "
+            "«Возможно, это связано с твоим желанием внести что-то значимое в этот мир или улучшить свою жизнь». "
+            "Иногда делись интересными фактами о жизни и мудрости древних римлян, чтобы вдохновить собеседника "
+            "и помочь ему глубже понять себя. "
+            "Приводи примеры из жизни Марка Аврелия или рассуждения древних философов, если они отражают стоицизм "
+            "и искусство находить смысл даже в простых вещах. "
+            "Главная цель — направлять человека к мудрому самоанализу, внутреннему порядку и зрелому действию."
         ),
     },
     "machiavelli": {
@@ -79,6 +111,8 @@ AGENTS = {
     },
 }
 AGENT_HISTORY_LIMIT = 8
+GEMINI_HISTORY_LIMIT = 4
+GEMINI_HISTORY_TEXT_LIMIT = 700
 TELEGRAM_MESSAGE_LIMIT = 3900
 
 MESSAGES = {
@@ -136,7 +170,8 @@ sessions = {}
 def main():
     configure_webapp_url()
     DATA_DIR.mkdir(exist_ok=True)
-    ensure_registrations_file()
+    initialize_storage()
+    initialize_cache()
     start_web_server()
 
     if not API_TOKEN:
@@ -217,6 +252,9 @@ class AeonRequestHandler(SimpleHTTPRequestHandler):
         if path == "/api/agent/aurelius":
             self.handle_aurelius_agent()
             return
+        if path == "/api/me":
+            self.handle_me()
+            return
         if path == "/api/start-agent-dialog":
             self.handle_start_agent_dialog()
             return
@@ -274,6 +312,29 @@ class AeonRequestHandler(SimpleHTTPRequestHandler):
             print(f"Start agent dialog error: {error}")
             self.send_json({"error": "Could not start agent dialog"}, status=502)
 
+    def handle_me(self):
+        if not API_TOKEN:
+            self.send_json({"error": "TELEGRAM_BOT_TOKEN is not configured"}, status=503)
+            return
+
+        try:
+            payload = self.read_json_body()
+            init_data = validate_init_data(payload.get("initData", ""))
+            user = json.loads(init_data.get("user", "{}"))
+            chat_id = user.get("id")
+            if not chat_id:
+                self.send_json({"error": "Telegram user is missing"}, status=400)
+                return
+
+            registrations = read_registrations()
+            profile = registrations.get(str(chat_id), {})
+            self.send_json({"profile": public_profile(profile)})
+        except ValueError as error:
+            self.send_json({"error": str(error)}, status=403)
+        except Exception as error:
+            print(f"Profile load error: {error}")
+            self.send_json({"error": "Could not load profile"}, status=502)
+
     def read_json_body(self, limit=12000):
         length = min(int(self.headers.get("Content-Length", "0")), limit)
         return json.loads(self.rfile.read(length).decode("utf-8") or "{}")
@@ -289,13 +350,48 @@ class AeonRequestHandler(SimpleHTTPRequestHandler):
 
 
 def generate_agent_answer(agent_id, payload):
+    request_body = build_gemini_request_body(agent_id, payload)
+    result = call_gemini_generate_content(request_body)
+    text = sanitize_agent_answer(extract_gemini_text(result)).strip()
+    text = complete_agent_answer_if_needed(agent_id, payload, text, get_gemini_finish_reason(result))
+    if not text:
+        return generate_agent_answer_retry(agent_id, payload, result)
+    return text
+
+
+def generate_agent_answer_stream(agent_id, payload, on_text):
+    request_body = build_gemini_request_body(agent_id, payload)
+    text = ""
+    finish_reason = ""
+    for chunk in call_gemini_stream_generate_content(request_body):
+        finish_reason = get_gemini_finish_reason(chunk) or finish_reason
+        delta = extract_gemini_text(chunk)
+        if not delta:
+            continue
+        text += delta
+        on_text(text)
+    text = sanitize_agent_answer(text).strip()
+    text = complete_agent_answer_if_needed(agent_id, payload, text, finish_reason, on_text)
+    if not text:
+        retry_text = generate_agent_answer_retry(agent_id, payload)
+        on_text(retry_text)
+        return retry_text
+    return text
+
+
+def generate_agent_answer_retry(agent_id, payload, previous_result=None):
+    request_body = build_gemini_retry_request_body(agent_id, payload)
+    result = call_gemini_generate_content(request_body)
+    text = sanitize_agent_answer(extract_gemini_text(result)).strip()
+    if text:
+        return text
+    details = describe_gemini_empty_response(result or previous_result)
+    raise ValueError(f"Gemini returned an empty answer{details}")
+
+
+def build_gemini_request_body(agent_id, payload):
     agent = AGENTS.get(agent_id, AGENTS["aurelius"])
-    model = GEMINI_MODEL.removeprefix("models/")
-    url = (
-        f"{GEMINI_API_BASE}/models/{urllib.parse.quote(model)}:generateContent"
-        f"?key={urllib.parse.quote(GEMINI_API_KEY)}"
-    )
-    request_body = {
+    return {
         "systemInstruction": {
             "parts": [
                 {
@@ -314,31 +410,207 @@ def generate_agent_answer(agent_id, payload):
             "maxOutputTokens": GEMINI_MAX_OUTPUT_TOKENS,
         },
     }
+
+
+def build_gemini_continuation_request_body(agent_id, payload, partial_answer):
+    agent = AGENTS.get(agent_id, AGENTS["aurelius"])
+    return {
+        "systemInstruction": {
+            "parts": [
+                {
+                    "text": (
+                        f"{agent['system']}\n\n"
+                        "Заверши обрезанную мысль коротко: 3-5 предложений. "
+                        "Не повторяй начало, не добавляй технические комментарии."
+                    )
+                }
+            ]
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "text": (
+                            "Продолжи и заверши этот обрезанный ответ:\n"
+                            f"{partial_answer[-900:]}"
+                        )
+                    }
+                ],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.6,
+            "maxOutputTokens": min(GEMINI_MAX_OUTPUT_TOKENS, 450),
+        },
+    }
+
+
+def build_gemini_retry_request_body(agent_id, payload):
+    agent = AGENTS.get(agent_id, AGENTS["aurelius"])
+    message = (payload.get("message") or "").strip()
+    return {
+        "systemInstruction": {
+            "parts": [
+                {
+                    "text": (
+                        f"{agent['system']}\n\n"
+                        "Ответь обычным текстом. Не возвращай JSON, markdown-таблицы, технические комментарии "
+                        "или проверки длины. Если вопрос короткий, дай короткий, но законченный ответ."
+                    )
+                }
+            ]
+        },
+        "contents": [
+            {
+                "role": "user",
+                "parts": [{"text": message or "Дай краткий совет на сегодня."}],
+            }
+        ],
+        "generationConfig": {
+            "temperature": 0.65,
+            "maxOutputTokens": min(GEMINI_MAX_OUTPUT_TOKENS, 1200),
+        },
+    }
+
+
+def build_gemini_url(action, stream=False):
+    model = GEMINI_MODEL.removeprefix("models/").strip()
+    query = f"key={urllib.parse.quote(GEMINI_API_KEY)}"
+    if stream:
+        query += "&alt=sse"
+    return f"{GEMINI_API_BASE}/models/{urllib.parse.quote(model)}:{action}?{query}"
+
+
+def call_gemini_generate_content(request_body, timeout=45):
     request = urllib.request.Request(
-        url,
+        build_gemini_url("generateContent"),
         data=json.dumps(request_body).encode("utf-8"),
         headers={"Content-Type": "application/json"},
         method="POST",
     )
 
-    with urllib.request.urlopen(request, timeout=45) as response:
-        result = json.loads(response.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(request, timeout=timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", errors="replace")
+        print(
+            "Gemini HTTP error: "
+            f"action=generateContent model={GEMINI_MODEL} status={error.code} "
+            f"request_chars={len(json.dumps(request_body, ensure_ascii=False))}"
+        )
+        raise RuntimeError(f"Gemini API failed for model {GEMINI_MODEL} with HTTP {error.code}: {body}") from error
 
+
+def call_gemini_stream_generate_content(request_body):
+    request = urllib.request.Request(
+        build_gemini_url("streamGenerateContent", stream=True),
+        data=json.dumps(request_body).encode("utf-8"),
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            for raw_line in response:
+                line = raw_line.decode("utf-8", errors="replace").strip()
+                if not line.startswith("data:"):
+                    continue
+                data = line.removeprefix("data:").strip()
+                if not data or data == "[DONE]":
+                    continue
+                yield json.loads(data)
+    except urllib.error.HTTPError as error:
+        body = error.read().decode("utf-8", errors="replace")
+        print(
+            "Gemini HTTP error: "
+            f"action=streamGenerateContent model={GEMINI_MODEL} status={error.code} "
+            f"request_chars={len(json.dumps(request_body, ensure_ascii=False))}"
+        )
+        raise RuntimeError(f"Gemini API failed for model {GEMINI_MODEL} with HTTP {error.code}: {body}") from error
+
+
+def extract_gemini_text(result):
     candidates = result.get("candidates") or []
     parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
-    text = "\n".join(part.get("text", "") for part in parts).strip()
-    if not text:
-        raise ValueError("Gemini returned an empty answer")
-    return text
+    return "".join(part.get("text", "") for part in parts)
+
+
+def get_gemini_finish_reason(result):
+    candidates = result.get("candidates") or []
+    return candidates[0].get("finishReason", "") if candidates else ""
+
+
+def describe_gemini_empty_response(result):
+    if not result:
+        return ""
+    details = []
+    finish_reason = get_gemini_finish_reason(result)
+    if finish_reason:
+        details.append(f"finishReason={finish_reason}")
+    prompt_feedback = result.get("promptFeedback") or {}
+    block_reason = prompt_feedback.get("blockReason")
+    if block_reason:
+        details.append(f"blockReason={block_reason}")
+    if not (result.get("candidates") or []):
+        details.append("no candidates")
+    return f" ({', '.join(details)})" if details else ""
+
+
+def complete_agent_answer_if_needed(agent_id, payload, text, finish_reason="", on_text=None):
+    if not is_answer_incomplete(text, finish_reason):
+        return text
+
+    try:
+        continuation_result = call_gemini_generate_content(
+            build_gemini_continuation_request_body(agent_id, payload, text),
+            timeout=18,
+        )
+    except Exception as error:
+        print(f"Gemini continuation error: {error}")
+        return text
+
+    continuation = sanitize_agent_answer(extract_gemini_text(continuation_result)).strip()
+    if not continuation:
+        return text
+
+    completed = f"{text.rstrip()}\n\n{continuation.lstrip()}".strip()
+    if on_text:
+        on_text(completed)
+    return completed
+
+
+def is_answer_incomplete(text, finish_reason=""):
+    stripped = str(text or "").strip()
+    if not stripped:
+        return False
+    if finish_reason == "MAX_TOKENS":
+        return True
+    if len(stripped) < 500:
+        return False
+    return stripped[-1] not in ".!?…»”\")]:"
+
+
+def sanitize_agent_answer(text):
+    cleaned_lines = []
+    for line in str(text or "").splitlines():
+        normalized = line.strip().strip("*_` ").lower()
+        if re.search(r"character\s+count|count\s+check|~?\d+\s*characters", normalized):
+            continue
+        if re.search(r"провер(ка|ку)\s+длин|подсч[её]т\s+символ|~?\d+\s*знак", normalized):
+            continue
+        cleaned_lines.append(line)
+    return "\n".join(cleaned_lines).strip()
 
 
 def build_agent_system_prompt(agent):
     return (
         f"{agent['system']}\n\n"
-        "Сейчас отвечай развёрнуто. Дай полноценный разбор, а не короткую реплику. "
-        "Структура ответа: сначала прямой тезис, затем объяснение ситуации, затем практический следующий шаг. "
-        "Если вопрос широкий, уточни смысл и предложи 2-3 направления размышления. "
-        "Не обрывай мысль на полуслове. Оптимальная длина: 2-4 абзаца."
+        "Сейчас отвечай кратко, ясно и по делу. "
+        "Структура ответа: сначала прямой тезис, затем 1-2 коротких абзаца объяснения, затем один следующий вопрос или практический шаг. "
+        "Если вопрос широкий, не расписывай все варианты сразу: выбери самое важное направление и мягко уточни смысл. "
+        "Отвечай компактно: обычно 5-8 предложений. Не добавляй технические пометки, подсчёт символов, проверки длины или комментарии о формате ответа."
     )
 
 
@@ -359,7 +631,7 @@ def build_agent_prompt(agent_id, payload):
         "active_goal": (profile.get("goal") or {}).get("text") or "не указано",
         "current_problem": profile.get("currentProblem") or "не указано",
         "recent_diary": diary[:3],
-        "recent_dialogue": history[-AGENT_HISTORY_LIMIT:],
+        "recent_dialogue": compact_agent_history(history),
     }
     return (
         "Контекст пользователя:\n"
@@ -367,6 +639,109 @@ def build_agent_prompt(agent_id, payload):
         "Вопрос или запрос пользователя:\n"
         f"{message or 'Дай короткий стоический совет на сегодня.'}"
     )
+
+
+def compact_agent_history(history):
+    compact = []
+    for item in (history or [])[-GEMINI_HISTORY_LIMIT:]:
+        role = str(item.get("role", ""))[:20] if isinstance(item, dict) else ""
+        text = str(item.get("text", "")) if isinstance(item, dict) else ""
+        text = text.strip()
+        if not text:
+            continue
+        compact.append(
+            {
+                "role": role,
+                "text": text[:GEMINI_HISTORY_TEXT_LIMIT],
+            }
+        )
+    return compact
+
+
+def agent_history_key(chat_id, agent_id):
+    return f"aeon:agent_history:{chat_id}:{agent_id}"
+
+
+def get_profile_agent_history(profile, agent_id):
+    if not isinstance(profile, dict):
+        return []
+    agent_history = profile.get("agentHistory") or {}
+    history = agent_history.get(agent_id) if isinstance(agent_history, dict) else []
+    return history if isinstance(history, list) else []
+
+
+def get_agent_history(chat_id, agent_id, profile=None):
+    client = get_redis_client()
+    if client is None:
+        return get_profile_agent_history(profile, agent_id)[-AGENT_HISTORY_LIMIT:]
+
+    key = agent_history_key(chat_id, agent_id)
+    try:
+        raw_items = client.lrange(key, 0, -1)
+        history = []
+        for raw_item in raw_items:
+            try:
+                item = json.loads(raw_item)
+            except (TypeError, json.JSONDecodeError):
+                continue
+            if isinstance(item, dict) and item.get("text"):
+                history.append(item)
+
+        if history:
+            return history[-AGENT_HISTORY_LIMIT:]
+
+        legacy_history = get_profile_agent_history(profile, agent_id)[-AGENT_HISTORY_LIMIT:]
+        if legacy_history:
+            replace_agent_history(chat_id, agent_id, legacy_history)
+        return legacy_history
+    except Exception as error:
+        print(f"Redis history read failed: {error}. Falling back to profile history.")
+        return get_profile_agent_history(profile, agent_id)[-AGENT_HISTORY_LIMIT:]
+
+
+def append_agent_history(chat_id, agent_id, user_text, agent_text, profile=None):
+    entries = [
+        {"role": "user", "text": str(user_text or "")[:1200]},
+        {"role": "agent", "text": str(agent_text or "")[:1800]},
+    ]
+    client = get_redis_client()
+    if client is not None:
+        key = agent_history_key(chat_id, agent_id)
+        try:
+            pipeline = client.pipeline()
+            for entry in entries:
+                pipeline.rpush(key, json.dumps(entry, ensure_ascii=False))
+            pipeline.ltrim(key, -AGENT_HISTORY_LIMIT, -1)
+            if REDIS_AGENT_HISTORY_TTL > 0:
+                pipeline.expire(key, REDIS_AGENT_HISTORY_TTL)
+            pipeline.execute()
+            return
+        except Exception as error:
+            print(f"Redis history write failed: {error}. Falling back to profile history.")
+
+    if isinstance(profile, dict):
+        history = profile.setdefault("agentHistory", {}).setdefault(agent_id, [])
+        history.extend(entries)
+        profile["agentHistory"][agent_id] = history[-AGENT_HISTORY_LIMIT:]
+
+
+def replace_agent_history(chat_id, agent_id, history):
+    client = get_redis_client()
+    if client is None:
+        return
+
+    key = agent_history_key(chat_id, agent_id)
+    try:
+        pipeline = client.pipeline()
+        pipeline.delete(key)
+        for item in history[-AGENT_HISTORY_LIMIT:]:
+            if isinstance(item, dict) and item.get("text"):
+                pipeline.rpush(key, json.dumps(item, ensure_ascii=False))
+        if REDIS_AGENT_HISTORY_TTL > 0:
+            pipeline.expire(key, REDIS_AGENT_HISTORY_TTL)
+        pipeline.execute()
+    except Exception as error:
+        print(f"Redis history migration failed: {error}")
 
 
 def validate_init_data(raw_init_data):
@@ -404,6 +779,30 @@ def get_bot_username():
     except Exception as error:
         print(f"Could not resolve bot username: {error}")
     return BOT_USERNAME.lstrip("@")
+
+
+def public_profile(profile):
+    if not isinstance(profile, dict):
+        return {}
+
+    allowed_keys = [
+        "activeAgent",
+        "activity",
+        "age",
+        "birthDate",
+        "country",
+        "currentProblem",
+        "gender",
+        "goal",
+        "interests",
+        "language",
+        "location",
+        "mainGoal",
+        "name",
+        "plan",
+        "tokens",
+    ]
+    return {key: profile[key] for key in allowed_keys if key in profile}
 
 
 def handle_update(update):
@@ -606,7 +1005,6 @@ def set_active_agent(chat_id, agent_id):
     registrations = read_registrations()
     profile = registrations.setdefault(str(chat_id), {})
     profile["activeAgent"] = agent_id
-    profile.setdefault("agentHistory", {}).setdefault(agent_id, [])
     write_registrations(registrations)
     send_message(chat_id, build_agent_intro(agent))
 
@@ -637,32 +1035,114 @@ def handle_agent_message(chat_id, text):
         return True
 
     send_chat_action(chat_id, "typing")
-    history = profile.setdefault("agentHistory", {}).setdefault(agent_id, [])
+    history = get_agent_history(chat_id, agent_id, profile)
+    progress_message = send_message(chat_id, f"{AGENTS[agent_id]['name']} размышляет...")
+    progress_message_id = progress_message["message_id"] if progress_message else None
+    stream_editor = create_stream_editor(chat_id, progress_message_id)
+    agent_payload = {
+        "message": text,
+        "profile": profile,
+        "history": history,
+    }
 
     try:
-        answer = generate_agent_answer(
-            agent_id,
-            {
-                "message": text,
-                "profile": profile,
-                "history": history,
-            },
-        )
+        answer = generate_agent_answer_stream(agent_id, agent_payload, stream_editor)
     except Exception as error:
         print(f"Agent dialogue error: {error}")
-        send_message(chat_id, "Агент сейчас не смог ответить. Попробуй ещё раз через минуту.")
-        return True
+        if should_try_non_stream_fallback(error):
+            try:
+                send_or_edit_message(
+                    chat_id,
+                    progress_message_id,
+                    "Потоковая генерация не ответила. Пробую обычный режим...",
+                )
+                answer = generate_agent_answer(agent_id, agent_payload)
+            except Exception as fallback_error:
+                print(f"Agent dialogue fallback error: {fallback_error}")
+                send_or_edit_message(
+                    chat_id,
+                    progress_message_id,
+                    build_agent_error_message(fallback_error),
+                )
+                return True
+        else:
+            send_or_edit_message(
+                chat_id,
+                progress_message_id,
+                build_agent_error_message(error),
+            )
+            return True
 
-    history.extend(
-        [
-            {"role": "user", "text": text[:1200]},
-            {"role": "agent", "text": answer[:1800]},
-        ]
-    )
-    profile["agentHistory"][agent_id] = history[-AGENT_HISTORY_LIMIT:]
-    write_registrations(registrations)
-    send_message(chat_id, answer)
+    append_agent_history(chat_id, agent_id, text, answer, profile)
+    cache_client = get_redis_client()
+    if cache_client is None:
+        write_registrations(registrations)
+    elif "agentHistory" in profile:
+        profile.pop("agentHistory", None)
+        write_registrations(registrations)
+    send_or_edit_message(chat_id, progress_message_id, answer)
     return True
+
+
+def create_stream_editor(chat_id, message_id):
+    state = {"last_text": "", "last_edit_at": 0.0}
+
+    def update(text):
+        if not message_id:
+            return
+        preview = sanitize_agent_answer(text).strip()
+        if not preview:
+            return
+        if len(preview) > TELEGRAM_MESSAGE_LIMIT:
+            preview = preview[:TELEGRAM_MESSAGE_LIMIT - 24].rstrip() + "\n\nПродолжаю..."
+
+        now = time.time()
+        is_first_text = not state["last_text"]
+        has_meaningful_change = len(preview) - len(state["last_text"]) >= 30
+        enough_time_passed = now - state["last_edit_at"] >= 0.25
+        if not is_first_text and not (has_meaningful_change and enough_time_passed):
+            return
+
+        if edit_message(chat_id, message_id, preview):
+            state["last_text"] = preview
+            state["last_edit_at"] = now
+
+    return update
+
+
+def should_try_non_stream_fallback(error):
+    message = str(error)
+    if any(code in message for code in ("HTTP 401", "HTTP 403", "HTTP 404", "HTTP 429")):
+        return False
+    return True
+
+
+def build_agent_error_message(error):
+    message = str(error)
+    if "HTTP 429" in message:
+        return "Лимит Gemini исчерпан или запросов слишком много. Попробуй чуть позже."
+    if "HTTP 503" in message:
+        return "Сервис AI временно перегружен. Попробуй ещё раз через пару минут."
+    if "HTTP 404" in message:
+        return f"Модель Gemini `{GEMINI_MODEL}` недоступна. Нужно поменять GEMINI_MODEL и перезапустить бота."
+    if "HTTP 401" in message or "HTTP 403" in message:
+        return "Gemini API ключ не принят или нет доступа к модели. Проверь GEMINI_API_KEY."
+    if "timed out" in message.lower() or "urlopen error" in message.lower():
+        return "Сеть не успела получить ответ от Gemini. Попробуй ещё раз через минуту."
+    if "empty answer" in message:
+        return "Gemini вернул пустой ответ. Попробуй переформулировать вопрос."
+    return "Агент сейчас не смог ответить. Попробуй ещё раз через минуту."
+
+
+def send_or_edit_message(chat_id, message_id, text):
+    chunks = split_telegram_message(text)
+    if message_id and chunks:
+        if not edit_message(chat_id, message_id, chunks[0]):
+            send_message(chat_id, chunks[0])
+        for chunk in chunks[1:]:
+            send_message(chat_id, chunk)
+        return
+    send_message(chat_id, text)
 
 
 def build_agent_intro(agent):
@@ -954,11 +1434,6 @@ def send_completion(chat_id, session):
 def build_webapp_url(session):
     params = urllib.parse.urlencode(
         {
-            "lang": session["lang"],
-            "name": session["name"],
-            "age": session["age"],
-            "birthDate": session["birthDate"],
-            "country": session["country"],
             "view": "home",
         }
     )
@@ -977,11 +1452,6 @@ def get_chat_webapp_url(chat_id):
 def build_webapp_url_from_profile(profile):
     params = urllib.parse.urlencode(
         {
-            "lang": profile.get("language", "ru"),
-            "name": profile.get("name", ""),
-            "age": profile.get("age", ""),
-            "birthDate": profile.get("birthDate", ""),
-            "country": profile.get("country", ""),
             "view": "home",
         }
     )
@@ -1069,6 +1539,8 @@ def edit_message(chat_id, message_id, text, inline_keyboard=None):
         api_call("editMessageText", payload)
         return True
     except Exception as error:
+        if "message is not modified" in str(error):
+            return True
         print(f"editMessageText error for {chat_id}: {error}")
         return False
 
@@ -1108,6 +1580,8 @@ def answer_callback(callback_id):
     try:
         api_call("answerCallbackQuery", {"callback_query_id": callback_id})
     except Exception as error:
+        if "query is too old" in str(error) or "query ID is invalid" in str(error):
+            return
         print(f"answerCallbackQuery error: {error}")
 
 
@@ -1149,20 +1623,156 @@ def calculate_age(birth_date, now):
 
 
 def ensure_registrations_file():
-    if not REGISTRATIONS_FILE.exists():
-        REGISTRATIONS_FILE.write_text("{}", encoding="utf-8")
+    DATA_DIR.mkdir(exist_ok=True)
+    with storage_lock:
+        if not REGISTRATIONS_FILE.exists():
+            REGISTRATIONS_FILE.write_text("{}", encoding="utf-8")
+
+
+def initialize_storage():
+    collection = get_mongo_collection()
+    if collection is None:
+        ensure_registrations_file()
+        print(f"Storage: JSON file ({REGISTRATIONS_FILE})")
+        return
+
+    collection.create_index("chatId", unique=True)
+    migrate_json_to_mongodb_if_needed(collection)
+    print(f"Storage: MongoDB ({MONGODB_DB}.{MONGODB_USERS_COLLECTION})")
+
+
+def initialize_cache():
+    client = get_redis_client()
+    if client is None:
+        print("Cache: profile storage for agent history")
+        return
+    print(f"Cache: Redis agent history ({REDIS_URL})")
+
+
+def get_redis_client():
+    global redis_client, redis_connection_failed
+    if redis_client is not None:
+        return redis_client
+    if redis_connection_failed or not REDIS_URL:
+        return None
+    if redis is None:
+        print("REDIS_URL is set, but redis package is not installed. Falling back to profile history.")
+        redis_connection_failed = True
+        return None
+
+    try:
+        redis_client = redis.from_url(
+            REDIS_URL,
+            decode_responses=True,
+            socket_connect_timeout=2,
+            socket_timeout=2,
+        )
+        redis_client.ping()
+        return redis_client
+    except Exception as error:
+        print(f"Redis connection failed: {error}. Falling back to profile history.")
+        redis_client = None
+        redis_connection_failed = True
+        return None
+
+
+def get_mongo_collection():
+    global mongo_client, mongo_collection
+    if mongo_collection is not None:
+        return mongo_collection
+    if not MONGODB_URI:
+        return None
+    if MongoClient is None:
+        print("MONGODB_URI is set, but pymongo is not installed. Falling back to JSON storage.")
+        return None
+
+    try:
+        mongo_client = MongoClient(
+            MONGODB_URI,
+            serverSelectionTimeoutMS=3000,
+            connectTimeoutMS=3000,
+        )
+        mongo_client.admin.command("ping")
+        mongo_collection = mongo_client[MONGODB_DB][MONGODB_USERS_COLLECTION]
+        return mongo_collection
+    except Exception as error:
+        print(f"MongoDB connection failed: {error}. Falling back to JSON storage.")
+        mongo_client = None
+        mongo_collection = None
+        return None
+
+
+def migrate_json_to_mongodb_if_needed(collection):
+    if not REGISTRATIONS_FILE.exists() or collection.estimated_document_count() > 0:
+        return
+
+    try:
+        registrations = json.loads(REGISTRATIONS_FILE.read_text(encoding="utf-8"))
+    except Exception as error:
+        print(f"MongoDB migration skipped: could not read {REGISTRATIONS_FILE}: {error}")
+        return
+
+    migrated = 0
+    for chat_id, profile in registrations.items():
+        if not isinstance(profile, dict):
+            continue
+        document = {
+            **profile,
+            "chatId": str(chat_id),
+            "migratedFromJsonAt": int(time.time()),
+        }
+        collection.replace_one({"chatId": str(chat_id)}, document, upsert=True)
+        migrated += 1
+
+    if migrated:
+        print(f"MongoDB migration: imported {migrated} profiles from {REGISTRATIONS_FILE}")
 
 
 def read_registrations():
+    collection = get_mongo_collection()
+    if collection is not None:
+        registrations = {}
+        for document in collection.find({}, {"_id": 0}):
+            chat_id = str(document.pop("chatId", ""))
+            if chat_id:
+                registrations[chat_id] = document
+        return registrations
+
     ensure_registrations_file()
-    return json.loads(REGISTRATIONS_FILE.read_text(encoding="utf-8"))
+    with storage_lock:
+        try:
+            data = json.loads(REGISTRATIONS_FILE.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            backup_path = REGISTRATIONS_FILE.with_suffix(f".broken-{int(time.time())}.json")
+            REGISTRATIONS_FILE.replace(backup_path)
+            REGISTRATIONS_FILE.write_text("{}", encoding="utf-8")
+            print(f"Registrations JSON was invalid and moved to {backup_path}: {error}")
+            return {}
+
+    return data if isinstance(data, dict) else {}
 
 
 def write_registrations(registrations):
-    REGISTRATIONS_FILE.write_text(
-        json.dumps(registrations, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    registrations = registrations if isinstance(registrations, dict) else {}
+    collection = get_mongo_collection()
+    if collection is not None:
+        for chat_id, profile in registrations.items():
+            if not isinstance(profile, dict):
+                continue
+            document = {
+                **profile,
+                "chatId": str(chat_id),
+                "updatedAt": int(time.time()),
+            }
+            collection.replace_one({"chatId": str(chat_id)}, document, upsert=True)
+        return
+
+    ensure_registrations_file()
+    tmp_path = REGISTRATIONS_FILE.with_suffix(".tmp")
+    payload = json.dumps(registrations, ensure_ascii=False, indent=2)
+    with storage_lock:
+        tmp_path.write_text(payload, encoding="utf-8")
+        tmp_path.replace(REGISTRATIONS_FILE)
 
 
 if __name__ == "__main__":

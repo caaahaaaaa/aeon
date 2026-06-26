@@ -1,0 +1,47 @@
+services:
+  app:
+    build: .
+    container_name: aeon-app
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    environment:
+      WEB_PORT: "5173"
+      MONGODB_URI: "mongodb://mongo:27017"
+      MONGODB_DB: "aeon"
+      MONGODB_USERS_COLLECTION: "registrations"
+      REDIS_URL: "redis://redis:6379/0"
+      REDIS_AGENT_HISTORY_TTL: "${REDIS_AGENT_HISTORY_TTL:-2592000}"
+      TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
+      BOT_USERNAME: "${BOT_USERNAME:-}"
+      WEBAPP_URL: "${WEBAPP_URL:-https://example.com}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GEMINI_MODEL: "${GEMINI_MODEL:-gemini-2.5-flash}"
+      GEMINI_MAX_OUTPUT_TOKENS: "${GEMINI_MAX_OUTPUT_TOKENS:-2500}"
+      REMINDER_HOUR: "${REMINDER_HOUR:-9}"
+    depends_on:
+      - mongo
+      - redis
+
+  mongo:
+    image: mongo:7
+    container_name: aeon-mongo
+    restart: unless-stopped
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+
+  redis:
+    image: redis:7-alpine
+    container_name: aeon-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: ["redis-server", "--appendonly", "yes"]
+
+volumes:
+  mongo_data:
+  redis_data:

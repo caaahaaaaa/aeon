@@ -87,7 +87,7 @@ For Telegram testing, start ngrok on the same port:
 ngrok http 5173
 ```
 
-Then use the generated HTTPS ngrok URL as `WEBAPP_URL`.
+Then use the generated HTTPS ngrok URL as `WEBAPP_URL`, or leave `WEBAPP_URL` empty: `bot.py` will try to read the active ngrok tunnel from `http://127.0.0.1:4040/api/tunnels`.
 
 Note: `python -m http.server` can serve the static interface, but Marcus Aurelius Gemini answers require `bot.py`, because `/api/agent/aurelius` lives in the Python backend.
 
@@ -102,6 +102,23 @@ $env:GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
 C:\Users\diaaa\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe bot.py
 ```
 
+Local ngrok run without `WEBAPP_URL`:
+
+```powershell
+ngrok http 5173
+```
+
+In a second terminal:
+
+```powershell
+$env:TELEGRAM_BOT_TOKEN="YOUR_TOKEN"
+$env:GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
+$env:MONGODB_URI="mongodb+srv://USER:PASSWORD@YOUR_CLUSTER.mongodb.net/?retryWrites=true&w=majority"
+$env:REDIS_URL="redis://localhost:6379/0"
+$env:WEB_PORT="5173"
+C:\Users\diaaa\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe bot.py
+```
+
 Environment variables:
 
 - `TELEGRAM_BOT_TOKEN`: Telegram bot token from BotFather
@@ -109,9 +126,76 @@ Environment variables:
 - `WEBAPP_URL`: public HTTPS URL for the Mini App
 - `REMINDER_HOUR`: daily reminder hour, default is `9`
 - `GEMINI_API_KEY`: Gemini API key for Marcus Aurelius answers
-- `GEMINI_MODEL`: Gemini model name, default is `gemini-3.5-flash`
-- `GEMINI_MAX_OUTPUT_TOKENS`: max Gemini answer tokens, default is `2400`
+- `GEMINI_MODEL`: Gemini model name, default is `gemini-2.5-flash`
+- `GEMINI_MAX_OUTPUT_TOKENS`: max Gemini answer tokens, default is `2500`
+- `MONGODB_URI`: MongoDB connection string; when omitted, the bot falls back to `data/registrations.json`
+- `MONGODB_DB`: MongoDB database name, default is `aeon`
+- `MONGODB_USERS_COLLECTION`: user profile collection, default is `registrations`
+- `REDIS_URL`: Redis connection string for short agent dialogue history; when omitted, history falls back to profile storage
+- `REDIS_AGENT_HISTORY_TTL`: Redis history lifetime in seconds, default is `2592000` (30 days)
 - `WEB_PORT`: local backend/static server port, default is `5173`
+
+Install Python dependencies:
+
+```powershell
+C:\Users\diaaa\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe -m pip install -r requirements.txt
+```
+
+Storage and cache:
+
+- With `MONGODB_URI`, profiles, goals, and active agents are stored in MongoDB.
+- With `REDIS_URL`, short agent dialogue history is stored in Redis and kept out of user profiles.
+- Without `REDIS_URL`, agent history falls back to MongoDB/JSON profile storage for local development.
+- Without `MONGODB_URI`, local development still works through `data/registrations.json`.
+- On first MongoDB start, existing `data/registrations.json` profiles are imported automatically if the Mongo collection is empty.
+
+## Docker
+
+Create local env file:
+
+```powershell
+copy .env.example .env
+```
+
+Edit `.env` and set real values for:
+
+- `TELEGRAM_BOT_TOKEN`
+- `GEMINI_API_KEY`
+- `WEBAPP_URL`
+- `BOT_USERNAME` if you want to set it manually
+
+Run app + local MongoDB + Redis:
+
+```powershell
+docker compose up --build
+```
+
+Open locally:
+
+```text
+http://127.0.0.1:5173/
+```
+
+For Telegram Mini App local testing, expose the app port:
+
+```powershell
+ngrok http 5173
+```
+
+Then put the generated HTTPS URL into `.env` as `WEBAPP_URL` and restart:
+
+```powershell
+docker compose up --build
+```
+
+Run only the app image with an external MongoDB:
+
+```powershell
+docker build -t aeon .
+docker run --env-file .env -p 5173:5173 aeon
+```
+
+Production note: for Railway or another host, use the `Dockerfile` for the app and a managed MongoDB connection string in `MONGODB_URI`.
 
 ## Gemini Diagnostics
 

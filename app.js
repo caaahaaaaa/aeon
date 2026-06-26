@@ -82,6 +82,7 @@ elements.birthDateInput.max = todayKey;
 renderAll();
 bindEvents();
 openView(initialView);
+void hydrateProfileFromBot();
 
 function bindEvents() {
   document.body.addEventListener("click", (event) => {
@@ -501,11 +502,7 @@ async function startAgentDialogFromMiniApp() {
     }
 
     showAnswer(`Диалог с ${agent.name} открыт в Telegram-боте.`);
-    if (data.botUsername && tg?.openTelegramLink) {
-      setTimeout(() => tg.openTelegramLink(`https://t.me/${data.botUsername}`), 450);
-    } else {
-      setTimeout(() => tg?.close?.(), 450);
-    }
+    setTimeout(() => tg?.close?.(), 250);
   } catch (error) {
     console.warn(error);
     showAnswer("Диалог можно начать только внутри Telegram Mini App, открытого из этого бота.");
@@ -625,6 +622,66 @@ function applyRegistrationParams() {
 
   if (Object.values(registration).some(Boolean)) {
     saveState();
+  }
+}
+
+async function hydrateProfileFromBot() {
+  if (!tg?.initData) return;
+
+  try {
+    const response = await fetch("/api/me", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ initData: tg.initData }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.profile) return;
+
+    applyServerProfile(data.profile);
+    saveState();
+    renderAll();
+  } catch (error) {
+    console.warn("Could not load Telegram profile", error);
+  }
+}
+
+function applyServerProfile(profile) {
+  const fieldMap = {
+    activity: "activity",
+    birthDate: "birthDate",
+    country: "country",
+    currentProblem: "currentProblem",
+    gender: "gender",
+    interests: "interests",
+    language: "language",
+    location: "location",
+    mainGoal: "mainGoal",
+    name: "name",
+    plan: "plan",
+    tokens: "tokens",
+  };
+
+  Object.entries(fieldMap).forEach(([sourceKey, stateKey]) => {
+    const value = profile[sourceKey];
+    if (value !== undefined && value !== null && value !== "") {
+      state[stateKey] = value;
+    }
+  });
+
+  if (profile.age !== undefined && profile.age !== null && profile.age !== "") {
+    state.manualAge = String(profile.age);
+  }
+
+  if (profile.country && !profile.location) {
+    state.location = profile.country;
+  }
+
+  if (profile.goal && typeof profile.goal === "object") {
+    state.goal = profile.goal;
+  }
+
+  if (agents[profile.activeAgent]) {
+    state.activeAgent = profile.activeAgent;
   }
 }
 

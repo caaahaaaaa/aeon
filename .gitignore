@@ -17,6 +17,7 @@ ENV/
 # Local secrets and config
 .env
 .env.*
+!.env.example
 
 # App runtime data
 data/

@@ -6,7 +6,7 @@ import urllib.request
 
 
 API_KEY = os.environ.get("GEMINI_API_KEY")
-MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash")
+MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
 API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 
 
