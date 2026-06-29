@@ -1,2 +1,2 @@
-pymongo[srv]==4.10.1
+psycopg[binary]==3.2.3
 redis==5.2.1

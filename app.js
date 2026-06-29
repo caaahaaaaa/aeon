@@ -148,8 +148,9 @@ function bindEvents() {
   elements.askForm?.addEventListener("submit", (event) => {
     event.preventDefault();
     const question = elements.askInput.value.trim();
+    if (!question) return;
     elements.askInput.value = "";
-    requestAgentAdvice(question);
+    startAgentDialog(question);
   });
 }
 
@@ -164,7 +165,7 @@ function runAction(action, button) {
     "open-sheet": () => openProfileSheet(button.dataset.sheet),
     "select-agent": () => selectAgent(button.dataset.agent),
     "start-agent-dialog": () => startAgentDialog(),
-    "agent-advice": () => requestAgentAdvice(),
+    "agent-advice": () => startAgentDialog(),
   };
 
   actions[action]?.();
@@ -425,46 +426,6 @@ function renderAboutSheet() {
   });
 }
 
-async function requestAgentAdvice(question = "") {
-  const agent = getActiveAgent();
-
-  if (state.activeAgent !== "aurelius") {
-    showAnswer(agent.advice);
-    return;
-  }
-
-  showAnswer("Марк Аврелий размышляет...");
-
-  try {
-    const response = await fetch("/api/agent/aurelius", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        message: question || "Дай мне короткий стоический совет на сегодня.",
-        profile: {
-          name: state.name,
-          age: getAgeLabel(),
-          location: state.location || state.country,
-          interests: state.interests,
-          mainGoal: state.mainGoal || activeGoalText(),
-          currentProblem: state.currentProblem,
-        },
-        diary: (state.diary ?? []).slice(0, 3).map((entry) => entry.text),
-      }),
-    });
-
-    const data = await response.json().catch(() => ({}));
-    if (!response.ok) {
-      throw new Error(data.error || "Gemini request failed");
-    }
-
-    showAnswer(data.answer || agent.advice);
-  } catch (error) {
-    console.warn(error);
-    showAnswer(`Gemini пока недоступен. ${agent.advice}`);
-  }
-}
-
 function selectAgent(agentId) {
   if (!agents[agentId]) return;
   state.activeAgent = agentId;
@@ -475,14 +436,15 @@ function selectAgent(agentId) {
   });
 }
 
-function startAgentDialog() {
-  void startAgentDialogFromMiniApp();
+function startAgentDialog(message = "") {
+  void startAgentDialogFromMiniApp(message);
 }
 
-async function startAgentDialogFromMiniApp() {
+async function startAgentDialogFromMiniApp(message = "") {
   const agent = getActiveAgent();
   const payload = {
     agentId: state.activeAgent,
+    message: message.trim(),
     initData: tg?.initData || "",
   };
 
@@ -501,8 +463,8 @@ async function startAgentDialogFromMiniApp() {
       throw new Error(data.error || "Could not start agent dialog");
     }
 
-    showAnswer(`Диалог с ${agent.name} открыт в Telegram-боте.`);
-    setTimeout(() => tg?.close?.(), 250);
+    haptic("impact");
+    tg?.close?.();
   } catch (error) {
     console.warn(error);
     showAnswer("Диалог можно начать только внутри Telegram Mini App, открытого из этого бота.");

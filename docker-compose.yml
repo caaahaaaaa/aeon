@@ -7,9 +7,8 @@ services:
       - "5173:5173"
     environment:
       WEB_PORT: "5173"
-      MONGODB_URI: "mongodb://mongo:27017"
-      MONGODB_DB: "aeon"
-      MONGODB_USERS_COLLECTION: "registrations"
+      DATABASE_URL: "postgresql://aeon:aeon@postgres:5432/aeon"
+      POSTGRES_USERS_TABLE: "${POSTGRES_USERS_TABLE:-registrations}"
       REDIS_URL: "redis://redis:6379/0"
       REDIS_AGENT_HISTORY_TTL: "${REDIS_AGENT_HISTORY_TTL:-2592000}"
       TELEGRAM_BOT_TOKEN: "${TELEGRAM_BOT_TOKEN:-}"
@@ -20,17 +19,21 @@ services:
       GEMINI_MAX_OUTPUT_TOKENS: "${GEMINI_MAX_OUTPUT_TOKENS:-2500}"
       REMINDER_HOUR: "${REMINDER_HOUR:-9}"
     depends_on:
-      - mongo
+      - postgres
       - redis
 
-  mongo:
-    image: mongo:7
-    container_name: aeon-mongo
+  postgres:
+    image: postgres:16-alpine
+    container_name: aeon-postgres
     restart: unless-stopped
+    environment:
+      POSTGRES_USER: aeon
+      POSTGRES_PASSWORD: aeon
+      POSTGRES_DB: aeon
     ports:
-      - "27017:27017"
+      - "5432:5432"
     volumes:
-      - mongo_data:/data/db
+      - postgres_data:/var/lib/postgresql/data
 
   redis:
     image: redis:7-alpine
@@ -43,5 +46,5 @@ services:
     command: ["redis-server", "--appendonly", "yes"]
 
 volumes:
-  mongo_data:
+  postgres_data:
   redis_data:

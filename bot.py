@@ -15,9 +15,13 @@ from pathlib import Path
 from threading import Lock, Thread
 
 try:
-    from pymongo import MongoClient
+    import psycopg
+    from psycopg import sql
+    from psycopg.types.json import Jsonb
 except ImportError:
-    MongoClient = None
+    psycopg = None
+    sql = None
+    Jsonb = None
 
 try:
     import redis
@@ -36,16 +40,14 @@ GEMINI_API_BASE = "https://generativelanguage.googleapis.com/v1beta"
 PORT = int(os.environ.get("PORT", os.environ.get("WEB_PORT", "5173")))
 DATA_DIR = Path("data")
 REGISTRATIONS_FILE = DATA_DIR / "registrations.json"
-MONGODB_URI = os.environ.get("MONGODB_URI", "")
-MONGODB_DB = os.environ.get("MONGODB_DB", "aeon")
-MONGODB_USERS_COLLECTION = os.environ.get("MONGODB_USERS_COLLECTION", "registrations")
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+POSTGRES_USERS_TABLE = os.environ.get("POSTGRES_USERS_TABLE", "registrations")
 REDIS_URL = os.environ.get("REDIS_URL", "")
 REDIS_AGENT_HISTORY_TTL = int(os.environ.get("REDIS_AGENT_HISTORY_TTL", "2592000"))
 REMINDER_HOUR = int(os.environ.get("REMINDER_HOUR", "9"))
 STATIC_ROOT = Path(__file__).resolve().parent
 INIT_DATA_MAX_AGE = int(os.environ.get("INIT_DATA_MAX_AGE", "172800"))
-mongo_client = None
-mongo_collection = None
+postgres_connection = None
 redis_client = None
 redis_connection_failed = False
 storage_lock = Lock()
@@ -70,32 +72,47 @@ AGENTS = {
         "role": "личный мудрец и психолог",
         "intro": "Диалог с Марком Аврелием открыт. Напиши, что требует ясности.",
         "system": (
-            "Ты римский философ-стоик Марк Аврелий, наставник и мудрый советник. "
-            "Отвечай на русском языке спокойно, глубоко и по-стоически. "
-            "Твоя задача — помогать человеку исследовать жизненные цели, предназначение и смысл жизни, "
-            "направляя его с помощью вопросов, как бережный психолог и наставник. "
-            "Не отвечай за пользователя и не навязывай ему готовую истину; помогай ему самому прийти к осмысленному взгляду "
-            "на свои стремления, ценности и цели. "
-            "Если человек затрудняется ответить на вопрос, поддержи его примерным вариантом ответа, который может помочь разобраться в себе. "
-            "Например: вопрос — «Почему это важно для тебя?»; примерный ответ — "
-            "«Возможно, это связано с твоим желанием внести что-то значимое в этот мир или улучшить свою жизнь». "
-            "Иногда делись интересными фактами о жизни и мудрости древних римлян, чтобы вдохновить собеседника "
-            "и помочь ему глубже понять себя. "
-            "Приводи примеры из жизни Марка Аврелия или рассуждения древних философов, если они отражают стоицизм "
-            "и искусство находить смысл даже в простых вещах. "
-            "Главная цель — направлять человека к мудрому самоанализу, внутреннему порядку и зрелому действию."
+            "Роль: ты — римский император и философ-стоик Марк Аврелий. "
+            "Твоя цель — быть мудрым наставником, который помогает собеседнику исследовать его жизненные цели, предназначение и ценности, "
+            "используя метод сократического диалога: спокойные наводящие вопросы, а не готовые решения. "
+            "Будь глубоким, спокойным и поддерживающим. Обращайся уважительно: «ты» или «мой друг». "
+            "Направляй мышление человека, но не решай за него и не навязывай вывод. "
+            "Правило одного вопроса: в каждом ответе задавай только один вопрос. Никогда не задавай два и более вопроса подряд. "
+            "Органично вплетай короткие примеры по мотивам «Размышлений» Марка Аврелия, мысли Эпиктета или Сенеки, "
+            "а также факты о быте и мудрости древних римлян. Делай это вдохновляюще и кратко, не превращай ответ в лекцию. "
+            "Если пользователь отвечает кратко, например «не знаю» или «сложно сказать», либо звучит растерянно, мягко поддержи его. "
+            "Предложи 1-2 гипотетических примера, от которых можно оттолкнуться, но не превращай эти примеры в дополнительные вопросы. "
+            "Пример поддержки: «Если тебе трудно определить это сейчас, возможно, твоё стремление связано с желанием оставить добрый след в мире; "
+            "или с поиском внутренней свободы». "
+            "Твоя задача — вести человека к самоанализу, внутреннему порядку и ясному пониманию собственных ценностей."
         ),
     },
     "machiavelli": {
         "button": "♞ Макиавелли",
         "name": "Макиавелли",
         "role": "коуч и тактический бизнес-тренер",
-        "intro": "Диалог с Макиавелли открыт. Опиши цель, игроков и ставку.",
+        "intro": (
+            "Мой государь, ты строишь своё государство — бизнес, карьеру, проект или влияние. "
+            "В какой важной битве или сложной ситуации тебе сейчас нужен мой холодный совет?"
+        ),
         "system": (
-            "Ты AI-агент Макиавелли: коуч и тактический бизнес-тренер. Отвечай на русском языке. "
-            "Смотри на ситуацию через цели, власть, ресурсы, риски, переговоры и следующий выгодный ход. "
-            "Будь прямым, практичным и стратегичным. Не романтизируй манипуляции и не советуй вредные действия. "
-            "Пиши коротко, с ясным следующим шагом."
+            "Роль: ты — Никколо Макиавелли, флорентийский дипломат, политический философ и автор трактата «Государь». "
+            "Твоя цель — быть стратегическим советником пользователя: помогать ему добиваться целей, укреплять влияние, "
+            "побеждать в конкуренции и понимать скрытые мотивы окружающих. "
+            "Избегай наивного идеализма. Оценивай ситуации с точки зрения прагматизма, баланса сил, выгоды и эффективности. "
+            "Твой девиз: «Смотреть на вещи такими, какие они есть, а не какими они должны быть». "
+            "Говори кратко, ёмко, с лёгкой интеллектуальной иронией и непоколебимой уверенностью. "
+            "Используй уважительные обращения: «Мой государь», «Мой друг», «Владетель». "
+            "Анализируй окружение пользователя: кто союзники, кто конкуренты, в чём их слабости, какие ресурсы доступны. "
+            "Учи гибкости: объясняй, когда действовать силой, как лев, а когда хитростью, как лис. "
+            "Помогай отличать контролируемые факторы — Virtù: доблесть, расчёт, воля — от Fortuna: случая и судьбы. "
+            "Показывай, как пользователь может увеличить долю Virtù и уменьшить зависимость от Fortuna. "
+            "Периодически подкрепляй советы короткими примерами из истории Древнего Рима, из «Рассуждений о первой декаде Тита Ливия», "
+            "или из эпохи Возрождения: Чезаре Борджиа, папа Александр VI, Медичи. Проводь параллели с ситуацией пользователя, но не превращай ответ в лекцию. "
+            "Задавай точечные, иногда неудобные вопросы, которые заставляют пользователя трезво взглянуть на ресурсы, ставки и оппонентов. "
+            "Не давай банальных советов вроде «просто верь в себя». Предлагай конкретные тактические шаги. "
+            "Внутреннее правило безопасности: советы должны касаться только легальных сфер жизни — карьера, бизнес, переговоры, личные границы. "
+            "Не подстрекай к нарушению законов, насилию, обману, шантажу, взлому, преследованию или причинению вреда."
         ),
     },
     "jung": {
@@ -104,9 +121,16 @@ AGENTS = {
         "role": "психоаналитик тени",
         "intro": "Диалог с Карлом Юнгом открыт. Напиши, что повторяется или тревожит.",
         "system": (
-            "Ты AI-агент Карл Юнг: психоаналитик, который помогает человеку увидеть тень, проекции, страхи и повторяющиеся паттерны. "
-            "Отвечай на русском языке глубоко, но бережно. Не ставь диагнозы и не изображай врача. "
-            "Задавай один сильный вопрос и помогай увидеть скрытый мотив. Пиши 4-7 предложений."
+            "Роль: ты — Карл Юнг, внимательный исследователь внутренней жизни человека. "
+            "Ты помогаешь пользователю увидеть Тень, проекции, страхи, повторяющиеся паттерны и архетипические мотивы, "
+            "но не ставишь диагнозы, не изображаешь врача и не говоришь с позиции всезнающего гуру. "
+            "Говори как внимательный, умудрённый опытом слушатель. Избегай излишней мистики и перегруженных терминов. "
+            "Язык должен быть ясным, терапевтическим и метафоричным только тогда, когда метафора помогает объяснить сложную мысль. "
+            "Занимай позицию совместного исследователя событий и переживаний пользователя. "
+            "Алгоритм ответа: шаг 1 — эмпатия и отзеркаливание: сначала покажи, что услышал боль, напряжение или запутанность пользователя. "
+            "Шаг 2 — мягкое предположение: предложи гипотезу, связанную с Тенью, проекцией или Архетипом, но не утверждай её как истину. "
+            "Шаг 3 — один фокусный вопрос: завершай реплику строго одним открытым вопросом, который направляет внимание пользователя внутрь его ощущений. "
+            "В каждом ответе задавай только один вопрос. Не перегружай человека списками вопросов."
         ),
     },
 }
@@ -247,6 +271,14 @@ class AeonRequestHandler(SimpleHTTPRequestHandler):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(STATIC_ROOT), **kwargs)
 
+    def end_headers(self):
+        path = urllib.parse.urlparse(self.path).path
+        if path.endswith((".html", ".js", ".css")) or path == "/":
+            self.send_header("Cache-Control", "no-store, no-cache, must-revalidate, max-age=0")
+            self.send_header("Pragma", "no-cache")
+            self.send_header("Expires", "0")
+        super().end_headers()
+
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
         if path == "/api/agent/aurelius":
@@ -298,7 +330,10 @@ class AeonRequestHandler(SimpleHTTPRequestHandler):
                 self.send_json({"error": "Unknown agent"}, status=400)
                 return
 
-            set_active_agent(chat_id, agent_id)
+            initial_message = str(payload.get("message", "")).strip()
+            set_active_agent(chat_id, agent_id, announce=not initial_message)
+            if initial_message:
+                Thread(target=handle_agent_message, args=(chat_id, initial_message), daemon=True).start()
             self.send_json(
                 {
                     "ok": True,
@@ -610,6 +645,7 @@ def build_agent_system_prompt(agent):
         "Сейчас отвечай кратко, ясно и по делу. "
         "Структура ответа: сначала прямой тезис, затем 1-2 коротких абзаца объяснения, затем один следующий вопрос или практический шаг. "
         "Если вопрос широкий, не расписывай все варианты сразу: выбери самое важное направление и мягко уточни смысл. "
+        "Если задаёшь вопрос, он должен быть только один. "
         "Отвечай компактно: обычно 5-8 предложений. Не добавляй технические пометки, подсчёт символов, проверки длины или комментарии о формате ответа."
     )
 
@@ -996,7 +1032,7 @@ def send_agent_picker(chat_id):
     )
 
 
-def set_active_agent(chat_id, agent_id):
+def set_active_agent(chat_id, agent_id, announce=True):
     agent = AGENTS.get(agent_id)
     if not agent:
         send_agent_picker(chat_id)
@@ -1006,7 +1042,8 @@ def set_active_agent(chat_id, agent_id):
     profile = registrations.setdefault(str(chat_id), {})
     profile["activeAgent"] = agent_id
     write_registrations(registrations)
-    send_message(chat_id, build_agent_intro(agent))
+    if announce:
+        send_message(chat_id, build_agent_intro(agent))
 
 
 def clear_active_agent(chat_id):
@@ -1630,15 +1667,15 @@ def ensure_registrations_file():
 
 
 def initialize_storage():
-    collection = get_mongo_collection()
-    if collection is None:
+    connection = get_postgres_connection()
+    if connection is None:
         ensure_registrations_file()
         print(f"Storage: JSON file ({REGISTRATIONS_FILE})")
         return
 
-    collection.create_index("chatId", unique=True)
-    migrate_json_to_mongodb_if_needed(collection)
-    print(f"Storage: MongoDB ({MONGODB_DB}.{MONGODB_USERS_COLLECTION})")
+    ensure_postgres_schema(connection)
+    migrate_json_to_postgres_if_needed(connection)
+    print(f"Storage: PostgreSQL ({POSTGRES_USERS_TABLE})")
 
 
 def initialize_cache():
@@ -1676,66 +1713,98 @@ def get_redis_client():
         return None
 
 
-def get_mongo_collection():
-    global mongo_client, mongo_collection
-    if mongo_collection is not None:
-        return mongo_collection
-    if not MONGODB_URI:
+def get_postgres_connection():
+    global postgres_connection
+    if postgres_connection is not None and not postgres_connection.closed:
+        return postgres_connection
+    if not DATABASE_URL:
         return None
-    if MongoClient is None:
-        print("MONGODB_URI is set, but pymongo is not installed. Falling back to JSON storage.")
+    if psycopg is None:
+        print("DATABASE_URL is set, but psycopg is not installed. Falling back to JSON storage.")
         return None
 
     try:
-        mongo_client = MongoClient(
-            MONGODB_URI,
-            serverSelectionTimeoutMS=3000,
-            connectTimeoutMS=3000,
-        )
-        mongo_client.admin.command("ping")
-        mongo_collection = mongo_client[MONGODB_DB][MONGODB_USERS_COLLECTION]
-        return mongo_collection
+        postgres_connection = psycopg.connect(DATABASE_URL, autocommit=True, connect_timeout=3)
+        with postgres_connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        return postgres_connection
     except Exception as error:
-        print(f"MongoDB connection failed: {error}. Falling back to JSON storage.")
-        mongo_client = None
-        mongo_collection = None
+        print(f"PostgreSQL connection failed: {error}. Falling back to JSON storage.")
+        postgres_connection = None
         return None
 
 
-def migrate_json_to_mongodb_if_needed(collection):
-    if not REGISTRATIONS_FILE.exists() or collection.estimated_document_count() > 0:
+def ensure_postgres_schema(connection):
+    with connection.cursor() as cursor:
+        cursor.execute(
+            sql.SQL(
+                """
+                CREATE TABLE IF NOT EXISTS {} (
+                    chat_id TEXT PRIMARY KEY,
+                    profile JSONB NOT NULL DEFAULT '{}'::jsonb,
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+                )
+                """
+            ).format(sql.Identifier(POSTGRES_USERS_TABLE))
+        )
+
+
+def migrate_json_to_postgres_if_needed(connection):
+    if not REGISTRATIONS_FILE.exists():
+        return
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            sql.SQL("SELECT COUNT(*) FROM {}").format(sql.Identifier(POSTGRES_USERS_TABLE))
+        )
+        row_count = cursor.fetchone()[0]
+    if row_count > 0:
         return
 
     try:
         registrations = json.loads(REGISTRATIONS_FILE.read_text(encoding="utf-8"))
     except Exception as error:
-        print(f"MongoDB migration skipped: could not read {REGISTRATIONS_FILE}: {error}")
+        print(f"PostgreSQL migration skipped: could not read {REGISTRATIONS_FILE}: {error}")
         return
 
     migrated = 0
-    for chat_id, profile in registrations.items():
-        if not isinstance(profile, dict):
-            continue
-        document = {
-            **profile,
-            "chatId": str(chat_id),
-            "migratedFromJsonAt": int(time.time()),
-        }
-        collection.replace_one({"chatId": str(chat_id)}, document, upsert=True)
-        migrated += 1
+    with connection.cursor() as cursor:
+        for chat_id, profile in registrations.items():
+            if not isinstance(profile, dict):
+                continue
+            profile = {
+                **profile,
+                "migratedFromJsonAt": int(time.time()),
+            }
+            cursor.execute(
+                sql.SQL(
+                    """
+                    INSERT INTO {} (chat_id, profile, updated_at)
+                    VALUES (%s, %s, NOW())
+                    ON CONFLICT (chat_id)
+                    DO UPDATE SET profile = EXCLUDED.profile, updated_at = NOW()
+                    """
+                ).format(sql.Identifier(POSTGRES_USERS_TABLE)),
+                (str(chat_id), Jsonb(profile)),
+            )
+            migrated += 1
 
     if migrated:
-        print(f"MongoDB migration: imported {migrated} profiles from {REGISTRATIONS_FILE}")
+        print(f"PostgreSQL migration: imported {migrated} profiles from {REGISTRATIONS_FILE}")
 
 
 def read_registrations():
-    collection = get_mongo_collection()
-    if collection is not None:
+    connection = get_postgres_connection()
+    if connection is not None:
+        ensure_postgres_schema(connection)
         registrations = {}
-        for document in collection.find({}, {"_id": 0}):
-            chat_id = str(document.pop("chatId", ""))
-            if chat_id:
-                registrations[chat_id] = document
+        with connection.cursor() as cursor:
+            cursor.execute(
+                sql.SQL("SELECT chat_id, profile FROM {}").format(sql.Identifier(POSTGRES_USERS_TABLE))
+            )
+            for chat_id, profile in cursor.fetchall():
+                if chat_id and isinstance(profile, dict):
+                    registrations[str(chat_id)] = profile
         return registrations
 
     ensure_registrations_file()
@@ -1754,17 +1823,28 @@ def read_registrations():
 
 def write_registrations(registrations):
     registrations = registrations if isinstance(registrations, dict) else {}
-    collection = get_mongo_collection()
-    if collection is not None:
-        for chat_id, profile in registrations.items():
-            if not isinstance(profile, dict):
-                continue
-            document = {
-                **profile,
-                "chatId": str(chat_id),
-                "updatedAt": int(time.time()),
-            }
-            collection.replace_one({"chatId": str(chat_id)}, document, upsert=True)
+    connection = get_postgres_connection()
+    if connection is not None:
+        ensure_postgres_schema(connection)
+        with connection.cursor() as cursor:
+            for chat_id, profile in registrations.items():
+                if not isinstance(profile, dict):
+                    continue
+                profile = {
+                    **profile,
+                    "updatedAt": int(time.time()),
+                }
+                cursor.execute(
+                    sql.SQL(
+                        """
+                        INSERT INTO {} (chat_id, profile, updated_at)
+                        VALUES (%s, %s, NOW())
+                        ON CONFLICT (chat_id)
+                        DO UPDATE SET profile = EXCLUDED.profile, updated_at = NOW()
+                        """
+                    ).format(sql.Identifier(POSTGRES_USERS_TABLE)),
+                    (str(chat_id), Jsonb(profile)),
+                )
         return
 
     ensure_registrations_file()

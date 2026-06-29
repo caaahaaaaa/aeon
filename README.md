@@ -113,7 +113,7 @@ In a second terminal:
 ```powershell
 $env:TELEGRAM_BOT_TOKEN="YOUR_TOKEN"
 $env:GEMINI_API_KEY="YOUR_GEMINI_API_KEY"
-$env:MONGODB_URI="mongodb+srv://USER:PASSWORD@YOUR_CLUSTER.mongodb.net/?retryWrites=true&w=majority"
+$env:DATABASE_URL="postgresql://USER:PASSWORD@HOST:5432/DBNAME"
 $env:REDIS_URL="redis://localhost:6379/0"
 $env:WEB_PORT="5173"
 C:\Users\diaaa\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\python.exe bot.py
@@ -128,9 +128,8 @@ Environment variables:
 - `GEMINI_API_KEY`: Gemini API key for Marcus Aurelius answers
 - `GEMINI_MODEL`: Gemini model name, default is `gemini-2.5-flash`
 - `GEMINI_MAX_OUTPUT_TOKENS`: max Gemini answer tokens, default is `2500`
-- `MONGODB_URI`: MongoDB connection string; when omitted, the bot falls back to `data/registrations.json`
-- `MONGODB_DB`: MongoDB database name, default is `aeon`
-- `MONGODB_USERS_COLLECTION`: user profile collection, default is `registrations`
+- `DATABASE_URL`: PostgreSQL connection string; when omitted, the bot falls back to `data/registrations.json`
+- `POSTGRES_USERS_TABLE`: PostgreSQL table for user profiles, default is `registrations`
 - `REDIS_URL`: Redis connection string for short agent dialogue history; when omitted, history falls back to profile storage
 - `REDIS_AGENT_HISTORY_TTL`: Redis history lifetime in seconds, default is `2592000` (30 days)
 - `WEB_PORT`: local backend/static server port, default is `5173`
@@ -143,11 +142,11 @@ C:\Users\diaaa\.cache\codex-runtimes\codex-primary-runtime\dependencies\python\p
 
 Storage and cache:
 
-- With `MONGODB_URI`, profiles, goals, and active agents are stored in MongoDB.
+- With `DATABASE_URL`, profiles, goals, and active agents are stored in PostgreSQL.
 - With `REDIS_URL`, short agent dialogue history is stored in Redis and kept out of user profiles.
-- Without `REDIS_URL`, agent history falls back to MongoDB/JSON profile storage for local development.
-- Without `MONGODB_URI`, local development still works through `data/registrations.json`.
-- On first MongoDB start, existing `data/registrations.json` profiles are imported automatically if the Mongo collection is empty.
+- Without `REDIS_URL`, agent history falls back to PostgreSQL/JSON profile storage for local development.
+- Without `DATABASE_URL`, local development still works through `data/registrations.json`.
+- On first PostgreSQL start, existing `data/registrations.json` profiles are imported automatically if the `registrations` table is empty.
 
 ## Docker
 
@@ -164,7 +163,7 @@ Edit `.env` and set real values for:
 - `WEBAPP_URL`
 - `BOT_USERNAME` if you want to set it manually
 
-Run app + local MongoDB + Redis:
+Run app + local PostgreSQL + Redis:
 
 ```powershell
 docker compose up --build
@@ -188,14 +187,14 @@ Then put the generated HTTPS URL into `.env` as `WEBAPP_URL` and restart:
 docker compose up --build
 ```
 
-Run only the app image with an external MongoDB:
+Run only the app image with an external PostgreSQL:
 
 ```powershell
 docker build -t aeon .
 docker run --env-file .env -p 5173:5173 aeon
 ```
 
-Production note: for Railway or another host, use the `Dockerfile` for the app and a managed MongoDB connection string in `MONGODB_URI`.
+Production note: for Railway or another host, use the `Dockerfile` for the app and a managed PostgreSQL connection string in `DATABASE_URL`.
 
 ## Gemini Diagnostics
 
